@@ -1,0 +1,5 @@
+/dist
+*.test
+*.out
+/agentcfg
+.DS_Store

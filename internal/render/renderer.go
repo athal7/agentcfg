@@ -1,0 +1,191 @@
+// Package render defines the harness-agnostic rendering contract:
+// Renderer turns a loaded registry into a Plan of file/command Outputs plus
+// a list of Gaps describing any registry feature the target harness can't
+// express. Concrete renderers (internal/render/opencode, internal/render/omp,
+// ...) implement Renderer; nothing in this package knows about a specific
+// harness's file formats.
+package render
+
+import (
+	"fmt"
+	"io/fs"
+
+	"github.com/athal7/agentcfg/internal/registry"
+)
+
+// Capability names one thing a renderer can express in a target harness's
+// native configuration. Renderers declare the subset they implement;
+// DetectGaps uses the declared set to find registry features that would
+// otherwise be silently dropped.
+type Capability string
+
+const (
+	CapAgentDefinitions    Capability = "agent_definitions"
+	CapPrimaryAgent        Capability = "primary_agent"
+	CapPromptAppend        Capability = "prompt_append"
+	CapPromptFileRef       Capability = "prompt_file_reference"
+	CapAgentSteps          Capability = "agent_steps"
+	CapAgentTaskPermission Capability = "agent_task_permission"
+	CapModelLiteralBinding Capability = "model_literal_binding"
+	CapModelClassBinding   Capability = "model_class_binding"
+	CapModelAliasOnly      Capability = "model_alias_only"
+	CapBashUnorderedMap    Capability = "bash_unordered_map"
+	CapBashOrderedList     Capability = "bash_ordered_list"
+	CapBashBucketedLists   Capability = "bash_bucketed_lists"
+	CapBashCoarseMode      Capability = "bash_coarse_mode"
+	CapBashInteriorGlob    Capability = "bash_interior_glob"
+	CapPerAgentBashPolicy  Capability = "per_agent_bash_policy"
+	CapGlobalBashPolicy    Capability = "global_bash_policy"
+	CapExternalDirectory   Capability = "external_directory_policy"
+	CapMCPLocalTransport   Capability = "mcp_local_transport"
+	CapMCPToolGlobs        Capability = "mcp_tool_globs"
+	CapMCPPerToolAsk       Capability = "mcp_per_tool_ask"
+	CapProjectModelPolicy  Capability = "project_model_policy"
+)
+
+// Options carries render-time inputs that aren't part of the registry
+// itself.
+type Options struct {
+	// RegistryRoot is the absolute path to the registry directory. Agent
+	// prompt files are usually read via Agent.ResolvedPromptFile (already
+	// joined against the root by registry.Load), but RegistryRoot is here
+	// for any renderer that needs the root directly.
+	RegistryRoot string
+
+	// ReadFile reads a file's contents. Defaults to os.ReadFile when nil.
+	// Tests inject a fixture-backed implementation so Render exercises no
+	// real filesystem I/O.
+	ReadFile func(path string) ([]byte, error)
+}
+
+// Renderer turns a loaded registry into a Plan for one target harness.
+type Renderer interface {
+	ID() string
+	Capabilities() []Capability
+
+	// Render MUST be pure: no file writes, no exec, no network. Resolving
+	// a registry.Value (env/file/command) is a read, not a write, and is
+	// allowed here — but a resolved secret value must never appear in a
+	// Gap.Detail or any other Plan field that might get logged or printed
+	// by --explain.
+	Render(reg *registry.Registry, opt Options) (*Plan, error)
+}
+
+// ProjectScopeRenderer is implemented only by renderers whose harness can
+// express directory-local model-class policy (e.g. a per-project config
+// file). Renderers that can't express this simply don't implement it.
+type ProjectScopeRenderer interface {
+	RenderProject(classes map[string]string, reg *registry.Registry, dir string) (*Plan, error)
+}
+
+// GapKind categorizes a Gap: whether the dropped feature was silently
+// skipped, or the renderer produced a reduced/alternative expression of it.
+type GapKind string
+
+const (
+	GapSkip      GapKind = "skip"
+	GapReduction GapKind = "reduction"
+)
+
+// Gap records one registry feature a renderer couldn't fully express.
+type Gap struct {
+	Kind       GapKind
+	Capability Capability
+	Subject    string // e.g. "agent:build.permissions.bash"
+	Detail     string // one human sentence stating the consequence; never a secret value
+}
+
+// Plan is the full set of native-config outputs and capability gaps
+// produced by rendering one registry for one harness.
+type Plan struct {
+	Outputs []Output
+	Gaps    []Gap
+}
+
+// Output is one file write or command a renderer wants applied. The apply
+// layer (a later phase) is responsible for actually writing files or
+// running commands; Render only describes what should happen.
+type Output interface {
+	// Describe returns a one-line human summary for --explain. It must
+	// never include a resolved secret value.
+	Describe() string
+}
+
+// WriteFile is a single file to write verbatim.
+type WriteFile struct {
+	Path    string
+	Mode    fs.FileMode
+	Content []byte
+}
+
+func (w WriteFile) Describe() string {
+	return fmt.Sprintf("write %s (%d bytes, mode %s)", w.Path, len(w.Content), w.Mode)
+}
+
+// MergeJSON merges Object into the JSON file at Path, touching only the
+// dotted paths listed in Managed (a "*" path segment matches any key, e.g.
+// "agent.*.model"). Keys outside Managed in an existing file are left
+// alone.
+type MergeJSON struct {
+	Path    string
+	Mode    fs.FileMode
+	Managed []string
+	Object  map[string]any
+}
+
+func (m MergeJSON) Describe() string {
+	return fmt.Sprintf("merge JSON into %s (managed: %v)", m.Path, m.Managed)
+}
+
+// MergeYAML is MergeJSON's YAML-file equivalent.
+type MergeYAML struct {
+	Path    string
+	Mode    fs.FileMode
+	Managed []string
+	Object  map[string]any
+}
+
+func (m MergeYAML) Describe() string {
+	return fmt.Sprintf("merge YAML into %s (managed: %v)", m.Path, m.Managed)
+}
+
+// MergeTOML is MergeJSON's TOML-file equivalent.
+type MergeTOML struct {
+	Path    string
+	Mode    fs.FileMode
+	Managed []string
+	Object  map[string]any
+}
+
+func (m MergeTOML) Describe() string {
+	return fmt.Sprintf("merge TOML into %s (managed: %v)", m.Path, m.Managed)
+}
+
+// RebuildDir replaces every file matching Glob under Dir with exactly the
+// contents of Files (files present in Dir but absent from Files are
+// removed). Paths on each WriteFile in Files are relative to Dir.
+type RebuildDir struct {
+	Dir   string
+	Glob  string
+	Files []WriteFile
+}
+
+func (r RebuildDir) Describe() string {
+	return fmt.Sprintf("rebuild %s/%s (%d files)", r.Dir, r.Glob, len(r.Files))
+}
+
+// RunCommand runs Argv as part of applying a Plan. Secret marks whether
+// Argv or the command's output may contain sensitive data — when true,
+// --explain must not print either verbatim.
+type RunCommand struct {
+	Argv   []string
+	Why    string
+	Secret bool
+}
+
+func (r RunCommand) Describe() string {
+	if r.Secret {
+		return fmt.Sprintf("run %s (%s) [output redacted]", r.Argv[0], r.Why)
+	}
+	return fmt.Sprintf("run %v (%s)", r.Argv, r.Why)
+}

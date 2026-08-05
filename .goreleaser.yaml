@@ -1,0 +1,38 @@
+version: 2
+
+project_name: agentcfg
+
+builds:
+  - id: agentcfg
+    main: ./cmd/agentcfg
+    binary: agentcfg
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      # internal/cli/version.go's `version` var is what backs `agentcfg
+      # --version`; this is the exact ldflags form documented in that
+      # file's own comment (kept in sync — do not invent a parallel
+      # main.version mechanism).
+      - -s -w -X github.com/athal7/agentcfg/internal/cli.version={{ .Tag }}
+
+archives:
+  - id: agentcfg
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: athal7
+    name: agentcfg
+
+

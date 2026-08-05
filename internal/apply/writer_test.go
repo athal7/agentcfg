@@ -98,3 +98,34 @@ func TestWriteFileContent_ConcurrentReadersSeeConsistentContent(t *testing.T) {
 		t.Fatalf("content is neither old nor new — possible partial read: len=%d", len(got))
 	}
 }
+
+func TestWriteFileContent_OverwriteReappliesMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.txt")
+
+	// Create a file with mode 0o644.
+	if err := writeFileContent(path, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("writeFileContent: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("initial mode perm = %o, want 0644", info.Mode().Perm())
+	}
+
+	// Overwrite with a different mode (0o600).
+	if err := writeFileContent(path, []byte("world"), 0o600); err != nil {
+		t.Fatalf("writeFileContent: %v", err)
+	}
+
+	info, err = os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode perm = %o, want 0600 (old file's mode leaked)", info.Mode().Perm())
+	}
+}

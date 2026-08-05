@@ -48,7 +48,30 @@ func printPlanExplain(w io.Writer, plans []targetPlan) {
 	}
 }
 
-// jsonOutput is one Output's --json representation: its concrete Go type,
+// outputTypeName returns a stable, harness-agnostic string for the JSON
+// "type" field. Using a switch instead of fmt.Sprintf("%T") so the JSON
+// output doesn't depend on Go's internal type names (which would change
+// if a struct is renamed or moved).
+func outputTypeName(o render.Output) string {
+	switch o.(type) {
+	case render.WriteFile:
+		return "write_file"
+	case render.MergeJSON:
+		return "merge_json"
+	case render.MergeYAML:
+		return "merge_yaml"
+	case render.MergeTOML:
+		return "merge_toml"
+	case render.RebuildDir:
+		return "rebuild_dir"
+	case render.RunCommand:
+		return "run_command"
+	default:
+		return "unknown"
+	}
+}
+
+// jsonOutput is one Output's --json representation: a stable type name,
 // its Path (or Dir, for RebuildDir) where the type has one, and its
 // Describe() string. RunCommand has no path at all — Path is simply
 // omitted for it.
@@ -59,7 +82,7 @@ type jsonOutput struct {
 }
 
 func toJSONOutput(o render.Output) jsonOutput {
-	jo := jsonOutput{Type: fmt.Sprintf("%T", o), Describe: o.Describe()}
+	jo := jsonOutput{Type: outputTypeName(o), Describe: o.Describe()}
 	switch v := o.(type) {
 	case render.WriteFile:
 		jo.Path = v.Path
@@ -110,9 +133,9 @@ type jsonPlanReport struct {
 }
 
 func printPlanJSON(w io.Writer, plans []targetPlan) error {
-	report := jsonPlanReport{}
+	report := jsonPlanReport{Targets: []jsonPlanTarget{}}
 	for _, p := range plans {
-		jt := jsonPlanTarget{Target: p.Target, Scope: p.Scope}
+		jt := jsonPlanTarget{Target: p.Target, Scope: p.Scope, Outputs: []jsonOutput{}, Gaps: []jsonGap{}}
 		for _, o := range p.Plan.Outputs {
 			jt.Outputs = append(jt.Outputs, toJSONOutput(o))
 		}
@@ -190,9 +213,17 @@ type jsonApplyReport struct {
 }
 
 func printApplyJSON(w io.Writer, outcomes []applyOutcome) error {
-	report := jsonApplyReport{}
+	report := jsonApplyReport{Targets: []jsonApplyTarget{}}
 	for _, o := range outcomes {
-		jt := jsonApplyTarget{Target: o.Target, Scope: o.Scope, Applied: o.Applied, Skipped: o.Skipped}
+		applied := o.Applied
+		if applied == nil {
+			applied = []string{}
+		}
+		skipped := o.Skipped
+		if skipped == nil {
+			skipped = []string{}
+		}
+		jt := jsonApplyTarget{Target: o.Target, Scope: o.Scope, Applied: applied, Skipped: skipped, Gaps: []jsonGap{}}
 		for _, g := range o.Gaps {
 			jt.Gaps = append(jt.Gaps, toJSONGap(g))
 		}

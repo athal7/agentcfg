@@ -7,8 +7,9 @@ import "github.com/athal7/agentcfg/internal/vocab"
 // harness-wide default (no registry field backs a global per-canonical
 // value, so these are always "allow"). vocab.Bash is handled separately
 // (its value comes from bashpolicy.Compile, not a static default);
-// vocab.ExternalDirectory has no registry field at all (see gaps.go) so it
-// is never emitted despite CapExternalDirectory being declared.
+// vocab.ExternalDirectory is not included here because it is a map type
+// (map[string]Decision) rather than a simple string permission — it is
+// emitted separately in agentPermissionMap via the external_directory key.
 var permissionKey = map[vocab.Canonical]string{
 	vocab.Read:     "read",
 	vocab.Edit:     "edit",

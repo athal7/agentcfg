@@ -74,10 +74,12 @@ func runExplainBash(out io.Writer, registryFlag, targetFlag, command string) err
 	}
 
 	var rows []bashExplainRow
+	var errors []string
 	for _, r := range targets {
 		row, matched, err := resolveBashRow(reg, r, command)
 		if err != nil {
 			fmt.Fprintf(out, "%s  error: %v\n", r.ID(), err)
+			errors = append(errors, r.ID())
 			continue
 		}
 		if !matched {
@@ -89,6 +91,9 @@ func runExplainBash(out io.Writer, registryFlag, targetFlag, command string) err
 
 	if len(rows) == 0 {
 		fmt.Fprintln(out, "no target resolved a decision for this command")
+		for _, e := range errors {
+			fmt.Fprintf(out, "! %s: target excluded (resolution error)\n", e)
+		}
 		return nil
 	}
 
@@ -102,6 +107,12 @@ func runExplainBash(out io.Writer, registryFlag, targetFlag, command string) err
 		fmt.Fprintln(out, "✓ agree")
 	} else {
 		fmt.Fprintln(out, "✗ disagree")
+	}
+
+	if len(errors) > 0 {
+		for _, e := range errors {
+			fmt.Fprintf(out, "! %s: target excluded (resolution error)\n", e)
+		}
 	}
 	return nil
 }

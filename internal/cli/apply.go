@@ -57,7 +57,7 @@ func runApplyCmd(cmd *cobra.Command, opts applyOptions) error {
 	bestEffort := opts.bestEffort || bestEffortFromEnv
 
 	switch {
-	case bestEffortFromFlag && strictFromFlag:
+	case bestEffortFromFlag && opts.bestEffort && strictFromFlag:
 		return fmt.Errorf("apply: --strict and --best-effort are mutually exclusive")
 	case !bestEffortFromFlag && bestEffortFromEnv && strictFromFlag:
 		bestEffort = false

@@ -119,17 +119,49 @@ func applyWriteFile(w render.WriteFile) (applied, skipped string, err error) {
 	return fmt.Sprintf("wrote %s", path), "", nil
 }
 
-// writeFileContent creates path's parent directory if needed and writes
-// content unconditionally. Callers are responsible for any git-tracked
-// guard — this helper is also used by RebuildDir, whose individual Files
-// are intentionally NOT git-guarded (the whole directory is
-// renderer-owned; see applyRebuildDir).
+// writeFileContent creates path's parent directory if needed, writes
+// content to a temporary file in the same directory, then atomically
+// renames it onto the final path. This prevents partial/corrupt files
+// on timeout or crash — the rename is atomic on the same filesystem,
+// so readers always see either the old file or the new file, never a
+// partially-written one.
+//
+// Callers are responsible for any git-tracked guard — this helper is
+// also used by RebuildDir, whose individual Files are intentionally NOT
+// git-guarded (the whole directory is renderer-owned; see
+// applyRebuildDir).
 func writeFileContent(path string, content []byte, mode fs.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating directory for %s: %w", path, err)
 	}
-	if err := os.WriteFile(path, content, mode); err != nil {
+
+	tmp, err := os.CreateTemp(dir, ".agentcfg-*")
+	if err != nil {
+		return fmt.Errorf("creating temp file for %s: %w", path, err)
+	}
+	tmpName := tmp.Name()
+
+	// Clean up the temp file on any failure path.
+	defer func() {
+		if err != nil {
+			os.Remove(tmpName)
+		}
+	}()
+
+	if _, err := tmp.Write(content); err != nil {
+		tmp.Close()
 		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return fmt.Errorf("setting permissions on %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing %s: %w", path, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("renaming %s to %s: %w", tmpName, path, err)
 	}
 	return nil
 }

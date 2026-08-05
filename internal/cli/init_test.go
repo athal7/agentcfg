@@ -75,6 +75,28 @@ func TestRunInit_WritesBashYAMLWithGlobalProfile(t *testing.T) {
 	}
 }
 
+func TestRunInit_FailsWhenNonAgentcfgScaffoldFileExists(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+
+	// Pre-create models.yaml (a non-agentcfg.yaml scaffold file).
+	modelsPath := filepath.Join(dir, "models.yaml")
+	if err := os.WriteFile(modelsPath, []byte("model_classes:\n  default: anthropic/old-model\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	err := runInit(&out, dir)
+	if err == nil {
+		t.Fatalf("expected error when models.yaml already exists, got nil")
+	}
+
+	// agentcfg.yaml must NOT have been written — the whole init
+	// should fail fast before writing anything.
+	if _, err := os.Stat(filepath.Join(dir, "agentcfg.yaml")); err == nil {
+		t.Errorf("agentcfg.yaml was written despite models.yaml existing (init should have failed fast)")
+	}
+}
+
 func TestRunInit_AgentcfgYAMLImportsBashYAML(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer

@@ -62,21 +62,10 @@ func newInitCmd() *cobra.Command {
 }
 
 // runInit scaffolds a minimal, valid starter registry at the resolved
-// directory. It refuses to run if agentcfg.yaml already exists there —
+// directory. It refuses to run if any scaffold file already exists there —
 // init is meant to bootstrap a fresh registry, never to clobber one.
 func runInit(out io.Writer, registryFlag string) error {
 	dir := ResolveRegistryDir(registryFlag)
-	entryPath := filepath.Join(dir, "agentcfg.yaml")
-
-	if _, err := os.Stat(entryPath); err == nil {
-		return fmt.Errorf("init: %s already exists; refusing to overwrite an existing registry", entryPath)
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("init: checking %s: %w", entryPath, err)
-	}
-
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("init: creating %s: %w", dir, err)
-	}
 
 	files := map[string]string{
 		"models.yaml":   starterModelsYAML,
@@ -84,6 +73,24 @@ func runInit(out io.Writer, registryFlag string) error {
 		"agents.yaml":   starterAgentsYAML,
 		"agentcfg.yaml": starterAgentcfgYAML,
 	}
+
+	// Check every scaffold file before writing any of them. This
+	// prevents partial overwrites: if init is run twice, the second
+	// run should fail rather than silently clobbering files it did not
+	// create.
+	for _, name := range []string{"models.yaml", "bash.yaml", "agents.yaml", "agentcfg.yaml"} {
+		path := filepath.Join(dir, name)
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf("init: %s already exists; refusing to overwrite an existing registry", path)
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("init: checking %s: %w", path, err)
+		}
+	}
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("init: creating %s: %w", dir, err)
+	}
+
 	// Write agentcfg.yaml last: a partially-written scaffold (e.g. disk
 	// full mid-write) should never look like a complete, loadable
 	// registry — Load only ever looks for agentcfg.yaml first.

@@ -27,9 +27,7 @@
 opencode: no gaps
 omp  skip  agent_steps  agent:build.steps
     agent "build" sets steps: 40; this harness has no step-budget mechanism, so the step limit is dropped.
-omp  skip  per_agent_bash_policy  lead, build
+omp  skip  per_agent_bash_policy  lead
     this harness has no per-agent bash scoping; only the global bash profile is applied, harness-wide, so per-agent profile overrides are dropped.
 omp  skip  external_directory_policy  agent:lead.permissions.external_directory
     agent "lead" sets permissions.external_directory; this harness has no external-directory access policy, so it was dropped.
-omp  skip  mcp_tool_globs  mcp:context7
-    mcp server "context7" has no tool allowlist support in this harness; all of its tools are exposed without glob-based filtering.

@@ -26,8 +26,7 @@ agents:
       task: deny
       edit: allow
       write: allow
-      bash:
-        profile: lead
+      bash: deny
     mcp:
       - server: context7
         ask: ["resolve-library-id"]

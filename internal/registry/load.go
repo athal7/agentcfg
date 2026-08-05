@@ -42,6 +42,7 @@ func Load(registryDir string) (*Registry, []ValidationError, []ValidationWarning
 	reg := &Registry{RootDir: dir}
 	st := newMergeState()
 	var verrs []ValidationError
+	var vWarns []ValidationWarning
 
 	verrs = append(verrs, mergeFileInto(reg, entry, "agentcfg.yaml", false, st)...)
 
@@ -49,6 +50,18 @@ func Load(registryDir string) (*Registry, []ValidationError, []ValidationWarning
 		paths, err := expandImport(dir, pattern)
 		if err != nil {
 			return nil, nil, nil, err
+		}
+		// Only warn when the glob's parent directory exists but nothing
+		// inside it matched — that's the "typo in the extension/pattern"
+		// case. A parent directory that doesn't exist at all (e.g. an
+		// optional bash.d/*.yaml split a registry never opted into) is a
+		// normal, silent no-op, not a mistake worth flagging.
+		if len(paths) == 0 && strings.Contains(pattern, "*") {
+			if parentInfo, statErr := os.Stat(filepath.Dir(filepath.Join(dir, pattern))); statErr == nil && parentInfo.IsDir() {
+				vWarns = append(vWarns, ValidationWarning{
+					Message: fmt.Sprintf("import glob %q matched no files", pattern),
+				})
+			}
 		}
 		for _, p := range paths {
 			fc, err := parseFile(p)
@@ -73,8 +86,9 @@ func Load(registryDir string) (*Registry, []ValidationError, []ValidationWarning
 	normalizeAgentModes(reg)
 	resolvePromptPaths(reg)
 
-	vErrs, vWarns := Validate(reg)
+	vErrs, vWarns2 := Validate(reg)
 	verrs = append(verrs, vErrs...)
+	vWarns = append(vWarns, vWarns2...)
 
 	return reg, verrs, vWarns, nil
 }

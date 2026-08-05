@@ -260,7 +260,7 @@ func renderMCPServer(s registry.MCPServer) (map[string]any, bool, *render.Gap) {
 	case "remote":
 		url, err := s.URL.Resolve()
 		if err != nil {
-			return nil, false, resolveFailureGap(s.Name, "url", err)
+			return nil, false, resolveFailureGap(s, "url", err)
 		}
 		entry["url"] = url
 	case "local":
@@ -268,25 +268,29 @@ func renderMCPServer(s registry.MCPServer) (map[string]any, bool, *render.Gap) {
 		for _, part := range s.Command {
 			resolved, err := part.Resolve()
 			if err != nil {
-				return nil, false, resolveFailureGap(s.Name, "command", err)
+				return nil, false, resolveFailureGap(s, "command", err)
 			}
 			cmd = append(cmd, resolved)
 		}
 		entry["command"] = cmd
 	default:
-		return nil, false, resolveFailureGap(s.Name, "transport", fmt.Errorf("unknown transport %q", s.Transport))
+		return nil, false, resolveFailureGap(s, "transport", fmt.Errorf("unknown transport %q", s.Transport))
 	}
 	return entry, true, nil
 }
 
-func resolveFailureGap(server, field string, err error) *render.Gap {
+func resolveFailureGap(s registry.MCPServer, field string, err error) *render.Gap {
+	cap := render.CapMCPLocalTransport
+	if s.Transport == "remote" {
+		cap = render.CapMCPRemoteTransport
+	}
 	return &render.Gap{
 		Kind:       render.GapSkip,
-		Capability: render.CapMCPLocalTransport,
-		Subject:    "mcp:" + server,
+		Capability: cap,
+		Subject:    "mcp:" + s.Name,
 		Detail: fmt.Sprintf(
 			"mcp server %q %s could not be resolved (%s); it was omitted from this harness's config.",
-			server, field, err,
+			s.Name, field, err,
 		),
 	}
 }

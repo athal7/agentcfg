@@ -77,9 +77,8 @@ without touching the shared files.
 
 ### `version`
 
-Plain `int`. Only the last file to set it wins (no merge conflict check on
-`version` itself, unlike every other key) since it's assigned directly
-rather than routed through the mergeKey/conflict-checking path.
+Plain `int`. Must appear in exactly one non-local file (same collision rule
+as every other top-level key). `local.yaml` may override it unconditionally.
 
 ## `harnesses:`
 

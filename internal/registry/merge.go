@@ -43,9 +43,7 @@ func mergeFileInto(reg *Registry, fc fileContents, path string, isLocal bool, st
 		apply()
 	}
 
-	if fc.Version != nil {
-		reg.Version = *fc.Version
-	}
+	mergeKey("version", fc.Version != nil, func() { reg.Version = *fc.Version })
 	mergeKey("harnesses", fc.Harnesses != nil, func() { reg.Harnesses = fc.Harnesses })
 	mergeKey("model_classes", fc.ModelClasses != nil, func() { reg.ModelClasses = fc.ModelClasses })
 	mergeKey("agents", fc.Agents != nil, func() { reg.Agents = fc.Agents })

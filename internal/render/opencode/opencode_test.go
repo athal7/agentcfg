@@ -179,8 +179,8 @@ func TestRender_UnresolvableMCPServerSkippedWithGap(t *testing.T) {
 		t.Fatalf("got %d gaps, want 1: %+v", len(plan.Gaps), plan.Gaps)
 	}
 	g := plan.Gaps[0]
-	if g.Kind != render.GapSkip || g.Capability != render.CapMCPLocalTransport {
-		t.Errorf("got kind=%s capability=%s, want skip/mcp_local_transport", g.Kind, g.Capability)
+	if g.Kind != render.GapSkip || g.Capability != render.CapMCPRemoteTransport {
+		t.Errorf("got kind=%s capability=%s, want skip/mcp_remote_transport", g.Kind, g.Capability)
 	}
 	if g.Subject != "mcp:broken" {
 		t.Errorf("got subject %q, want mcp:broken", g.Subject)

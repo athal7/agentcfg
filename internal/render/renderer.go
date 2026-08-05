@@ -38,6 +38,7 @@ const (
 	CapGlobalBashPolicy    Capability = "global_bash_policy"
 	CapExternalDirectory   Capability = "external_directory_policy"
 	CapMCPLocalTransport   Capability = "mcp_local_transport"
+	CapMCPRemoteTransport  Capability = "mcp_remote_transport"
 	CapMCPToolGlobs        Capability = "mcp_tool_globs"
 	CapMCPPerToolAsk       Capability = "mcp_per_tool_ask"
 	CapProjectModelPolicy  Capability = "project_model_policy"

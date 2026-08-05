@@ -70,7 +70,7 @@ func mergeFileInto(reg *Registry, fc fileContents, path string, isLocal bool, st
 func mergeBash(reg *Registry, src BashPolicy, path string, st *mergeState) []ValidationError {
 	var errs []ValidationError
 
-	if len(src.DefaultLists) > 0 {
+	if src.DefaultLists != nil {
 		if st.bashDefaultsSrc != "" {
 			errs = append(errs, ValidationError{
 				Message: fmt.Sprintf("bash.default_lists declared in both %s and %s", st.bashDefaultsSrc, path),

@@ -66,9 +66,11 @@ func Compile(policy registry.BashPolicy, profileName string) (map[string]Decisio
 
 	useDefaults := profile.DefaultLists == nil || *profile.DefaultLists
 	if useDefaults {
-		for _, listName := range policy.DefaultLists {
-			if err := applyList(listName); err != nil {
-				return nil, err
+		if policy.DefaultLists != nil {
+			for _, listName := range *policy.DefaultLists {
+				if err := applyList(listName); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}

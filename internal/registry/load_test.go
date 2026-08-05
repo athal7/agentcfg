@@ -721,3 +721,172 @@ func anyWarningContains(warns []registry.ValidationWarning, substr string) bool 
 	}
 	return false
 }
+
+// -- Finding 1: explicit empty default_lists should be tracked as a declaration --
+
+func TestLoad_BashDefaultListsExplicitEmptyIsCollision(t *testing.T) {
+	files := minimalFixtureFiles()
+	// bash.yaml declares default_lists; bash.d/override.yaml explicitly
+	// sets default_lists: [] (empty list, not absent). This should be a
+	// collision because the second file *declared* the field.
+	files["bash.d/override.yaml"] = `
+bash:
+  default_lists: []
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("expected soft validation error, got hard error: %v", err)
+	}
+	if !anyErrorContains(errs, `bash.default_lists declared in both`) {
+		t.Errorf("errs = %v, want a bash.default_lists collision error", errs)
+	}
+}
+
+func TestLoad_BashDefaultListsExplicitEmptyOverrides(t *testing.T) {
+	files := minimalFixtureFiles()
+	// local.yaml explicitly sets default_lists: [] — this should override
+	// the value from bash.yaml (local.yaml replaces whole keys).
+	// Use an agent that doesn't reference a bash profile, since local.yaml's
+	// bash: block replaces the entire Bash struct (wiping profiles).
+	files["agents.yaml"] = `
+agents:
+  - name: lead
+    description: "Primary orchestrator"
+    mode: primary
+    class: default
+    prompt: { text: "You are the lead." }
+    permissions:
+      task: allow
+      edit: deny
+      write: deny
+      skill: deny
+`
+	files["local.yaml"] = `
+bash:
+  default_lists: []
+`
+	reg, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("unexpected validation errors: %v", errs)
+	}
+	if reg.Bash.DefaultLists == nil || len(*reg.Bash.DefaultLists) != 0 {
+		t.Errorf("Bash.DefaultLists = %v, want empty slice after local.yaml override", reg.Bash.DefaultLists)
+	}
+}
+
+// -- Finding 2: prompt.file path traversal must be rejected --
+
+func TestValidate_PromptFileTraversalRejected(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+agents:
+  - name: lead
+    class: default
+    prompt: { file: ../../etc/passwd }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, "prompt file escapes registry root") {
+		t.Errorf("errs = %v, want a path-traversal rejection error", errs)
+	}
+}
+
+func TestValidate_PromptFileRelativeInRootStillWorks(t *testing.T) {
+	files := minimalFixtureFiles()
+	// A normal relative path inside the registry should still resolve fine.
+	files["agents.yaml"] = `
+agents:
+  - name: lead
+    class: default
+    prompt: { file: prompts/lead.md }
+`
+	reg, errs, warns, err := loadFixture(t, files)
+	requireNoProblems(t, errs, warns, err)
+	wantPrompt := filepath.Join(reg.RootDir, "prompts/lead.md")
+	if reg.Agents[0].ResolvedPromptFile != wantPrompt {
+		t.Errorf("ResolvedPromptFile = %q, want %q", reg.Agents[0].ResolvedPromptFile, wantPrompt)
+	}
+}
+
+// -- Finding 3: Value shape validation --
+
+func TestValidate_ValueFromCommandRequiresRun(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["mcp.yaml"] = `
+mcp_servers:
+  - name: context7
+    transport: remote
+    url: https://mcp.context7.com/mcp
+    headers:
+      X-Run: { from: command }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `from: command requires a run list`) {
+		t.Errorf("errs = %v, want from:command-requires-run error", errs)
+	}
+}
+
+func TestValidate_ValueFromEnvRequiresName(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["mcp.yaml"] = `
+mcp_servers:
+  - name: context7
+    transport: remote
+    url: https://mcp.context7.com/mcp
+    headers:
+      X-Env: { from: env }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `from: env requires a name`) {
+		t.Errorf("errs = %v, want from:env-requires-name error", errs)
+	}
+}
+
+func TestValidate_ValueFromFileRequiresPath(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["mcp.yaml"] = `
+mcp_servers:
+  - name: context7
+    transport: remote
+    url: https://mcp.context7.com/mcp
+    headers:
+      X-File: { from: file }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `from: file requires a path`) {
+		t.Errorf("errs = %v, want from:file-requires-path error", errs)
+	}
+}
+
+func TestValidate_ValueFromUnknownSourceRejected(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["mcp.yaml"] = `
+mcp_servers:
+  - name: context7
+    transport: remote
+    url: https://mcp.context7.com/mcp
+    headers:
+      X-Bad: { from: magic }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `unknown value source "magic"`) {
+		t.Errorf("errs = %v, want unknown value source error", errs)
+	}
+}

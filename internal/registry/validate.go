@@ -3,6 +3,7 @@ package registry
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // Validate checks a merged Registry for schema and consistency problems.
@@ -18,6 +19,7 @@ func Validate(reg *Registry) ([]ValidationError, []ValidationWarning) {
 	errs = append(errs, validateBash(reg)...)
 	errs = append(errs, validateMCPServers(reg)...)
 	errs = append(errs, validateContexts(reg)...)
+	errs = append(errs, validateValues(reg)...)
 
 	return errs, warns
 }
@@ -92,9 +94,15 @@ func validateAgents(reg *Registry) []ValidationError {
 				Message: fmt.Sprintf("agent %q must set exactly one of prompt.file or prompt.text, not both", a.Name),
 			})
 		case a.Prompt.File != "":
-			if _, err := os.Stat(a.ResolvedPromptFile); err != nil {
+			resolved := filepath.Join(reg.RootDir, a.Prompt.File)
+			rel, err := filepath.Rel(reg.RootDir, resolved)
+			if err != nil || filepath.IsAbs(rel) || rel == ".." || len(rel) > 2 && rel[:3] == ".."+string(filepath.Separator) {
 				errs = append(errs, ValidationError{
-					Message: fmt.Sprintf("referenced prompt file does not exist: %s", a.ResolvedPromptFile),
+					Message: fmt.Sprintf("prompt file escapes registry root: %s", a.Prompt.File),
+				})
+			} else if _, err := os.Stat(resolved); err != nil {
+				errs = append(errs, ValidationError{
+					Message: fmt.Sprintf("referenced prompt file does not exist: %s", resolved),
 				})
 			}
 		}
@@ -215,6 +223,58 @@ func validateContexts(reg *Registry) []ValidationError {
 				Message: fmt.Sprintf("context entry %d must set at least one of match.git_remote_host or match.git_remote_owner", i),
 			})
 		}
+	}
+	return errs
+}
+
+func validateValues(reg *Registry) []ValidationError {
+	var errs []ValidationError
+
+	for _, s := range reg.MCPServers {
+		if !s.URL.IsZero() {
+			errs = append(errs, validateValue(s.URL, fmt.Sprintf("mcp server %q url", s.Name))...)
+		}
+		for i, v := range s.Command {
+			errs = append(errs, validateValue(v, fmt.Sprintf("mcp server %q command[%d]", s.Name, i))...)
+		}
+		for k, v := range s.Headers {
+			errs = append(errs, validateValue(v, fmt.Sprintf("mcp server %q header %q", s.Name, k))...)
+		}
+	}
+
+	return errs
+}
+
+func validateValue(v Value, context string) []ValidationError {
+	var errs []ValidationError
+	if v.IsZero() {
+		return errs
+	}
+	switch v.From {
+	case "":
+		// literal value — always valid
+	case "env":
+		if v.Name == "" {
+			errs = append(errs, ValidationError{
+				Message: fmt.Sprintf("%s: from: env requires a name", context),
+			})
+		}
+	case "file":
+		if v.Path == "" {
+			errs = append(errs, ValidationError{
+				Message: fmt.Sprintf("%s: from: file requires a path", context),
+			})
+		}
+	case "command":
+		if len(v.Run) == 0 {
+			errs = append(errs, ValidationError{
+				Message: fmt.Sprintf("%s: from: command requires a run list", context),
+			})
+		}
+	default:
+		errs = append(errs, ValidationError{
+			Message: fmt.Sprintf("%s: unknown value source %q", context, v.From),
+		})
 	}
 	return errs
 }

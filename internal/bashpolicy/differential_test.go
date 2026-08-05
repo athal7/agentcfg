@@ -88,7 +88,7 @@ type differentialFixture struct {
 // than only ever hitting one pattern per command.
 func differentialFixtures() []differentialFixture {
 	leadPolicy := registry.BashPolicy{
-		DefaultLists: []string{"guardrails"},
+		DefaultLists: stringSlicePtr([]string{"guardrails"}),
 		Lists: map[string]map[string]registry.Decision{
 			"guardrails": {
 				"rm -rf /*": registry.Ask,

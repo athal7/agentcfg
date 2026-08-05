@@ -48,7 +48,7 @@ type HarnessConfig struct {
 
 // BashPolicy is the content of bash.yaml (merged with bash.d/*.yaml).
 type BashPolicy struct {
-	DefaultLists []string                       `yaml:"default_lists,omitempty"`
+	DefaultLists *[]string                      `yaml:"default_lists,omitempty"`
 	Lists        map[string]map[string]Decision `yaml:"lists,omitempty"`
 	Profiles     map[string]BashProfile         `yaml:"profiles,omitempty"`
 }

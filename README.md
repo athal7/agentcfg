@@ -47,6 +47,33 @@ flag set (`--scope`, `--context`, `--strict`, `--best-effort`, ...).
 
 The registry is just a directory of YAML files at `~/.config/agentcfg/`. Edit the files directly, or manage them with whatever you already use for config files — a dotfiles manager like chezmoi, a plain git checkout, symlinks — `agentcfg` neither knows nor cares which.
 
+| feature | opencode | omp | notes |
+|---|---|---|---|
+| agent_definitions | ✓ | ✓ | |
+| primary_agent | ✓ | ✗ | opencode-only concept |
+| prompt_append | ✗ | ✓ | omp-only concept |
+| prompt_file_reference | ✓ | ✓ | |
+| agent_steps | ✓ | ✗ | omp has no step-budget mechanism |
+| agent_task_permission | ✓ | ✗ | |
+| model_literal_binding | ✓ | ✗ | omp uses model classes only |
+| model_class_binding | ✗ | ✓ | opencode uses literal bindings only |
+| model_alias_only | ✗ | ✗ | not possible in either harness |
+| bash_unordered_map | ✓ | ✗ | opencode resolves by most-specific-match |
+| bash_ordered_list | ✗ | ✓ | omp resolves by first-match on ordered list |
+| bash_bucketed_lists | ✗ | ✗ | not possible in either harness |
+| bash_coarse_mode | ✗ | ✗ | not possible in either harness |
+| bash_interior_glob | ✓ | ✗ | |
+| per_agent_bash_policy | ✓ | ✗ | omp applies global profile harness-wide |
+| global_bash_policy | ✓ | ✓ | |
+| external_directory_policy | ✓ | ✗ | omp has no external-directory access policy |
+| mcp_local_transport | ✓ | ✓ | |
+| mcp_tool_globs | ✓ | ✗ | omp exposes all tools without glob filtering |
+| mcp_per_tool_ask | ✓ | ✗ | |
+| project_model_policy | ✓ | ✓ | |
+
+The table above is generated from the actual renderer code — see
+[`docs/capabilities.md`](docs/capabilities.md) for the live, auto-generated
+version (run `make docs-capabilities` to refresh).
 ## Documentation
 
 - [`docs/schema.md`](docs/schema.md) — the registry file layout and every

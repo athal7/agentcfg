@@ -21,7 +21,8 @@
 | external_directory_policy | ✓ | ✗ |
 | mcp_local_transport | ✓ | ✓ |
 | mcp_tool_globs | ✓ | ✗ |
-| mcp_per_tool_ask | ✓ | ✗ |
+| mcp_tool_allowlist | ✗ | ✓ |
+| mcp_per_tool_ask | ✓ | ✓ |
 | project_model_policy | ✓ | ✓ |
 
 opencode: no gaps
@@ -31,5 +32,5 @@ omp  skip  per_agent_bash_policy  lead, build
     this harness has no per-agent bash scoping; only the global bash profile is applied, harness-wide, so per-agent profile overrides are dropped.
 omp  skip  external_directory_policy  agent:lead.permissions.external_directory
     agent "lead" sets permissions.external_directory; this harness has no external-directory access policy, so it was dropped.
-omp  skip  mcp_tool_globs  mcp:context7
-    mcp server "context7" has no tool allowlist support in this harness; all of its tools are exposed without glob-based filtering.
+omp  reduction  mcp_per_tool_ask  mcp:context7
+    mcp server "context7"'s per-tool ask list is enforced harness-wide, not per agent — omp's tools.approval has no per-agent scoping, so every agent granted this server shares the same ask set.

@@ -43,6 +43,8 @@ func (renderer) Capabilities() []render.Capability {
 		render.CapBashOrderedList,
 		render.CapGlobalBashPolicy,
 		render.CapMCPLocalTransport,
+		render.CapMCPToolAllowlist,
+		render.CapMCPPerToolAsk,
 		render.CapProjectModelPolicy,
 	}
 }
@@ -83,6 +85,13 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 		return nil, err
 	}
 	plan.Outputs = append(plan.Outputs, bashCmd)
+
+	approvalCmd, approvalGaps := renderToolsApprovalCommand(reg)
+	plan.Gaps = append(plan.Gaps, approvalGaps...)
+	plan.Outputs = append(plan.Outputs,
+		render.RunCommand{Argv: []string{"omp", "config", "set", "tools.approvalMode", "always-ask"}, Why: "sync tool approval mode"},
+		approvalCmd,
+	)
 
 	mcpServers := map[string]any{}
 	for _, s := range reg.MCPServers {
@@ -140,6 +149,11 @@ func (r renderer) RenderProject(classes map[string]string, _ *registry.Registry,
 // omp. Paths are relative to agentsDir, per RebuildDir's documented
 // convention.
 func renderAgentFiles(reg *registry.Registry, readFile func(string) ([]byte, error)) ([]render.WriteFile, error) {
+	serverByName := make(map[string]registry.MCPServer, len(reg.MCPServers))
+	for _, s := range reg.MCPServers {
+		serverByName[s.Name] = s
+	}
+
 	var files []render.WriteFile
 	for _, a := range reg.Agents {
 		if a.Mode == "primary" || !targets(a.Targets) {
@@ -152,7 +166,7 @@ func renderAgentFiles(reg *registry.Registry, readFile func(string) ([]byte, err
 		files = append(files, render.WriteFile{
 			Path:    a.Name + ".md",
 			Mode:    0600,
-			Content: []byte(renderAgentFile(a, body)),
+			Content: []byte(renderAgentFile(a, body, serverByName)),
 		})
 	}
 	return files, nil
@@ -160,14 +174,36 @@ func renderAgentFiles(reg *registry.Registry, readFile func(string) ([]byte, err
 
 // renderAgentFile builds one subagent markdown file: YAML frontmatter
 // (name, description, tools, optional spawns/model) followed by "---" and
-// the raw prompt body.
-func renderAgentFile(a registry.Agent, body string) string {
+// the raw prompt body. MCP grants come from the agent's own mcp: list:
+// each granted server's tools (minus that entry's ask list — an
+// ask-listed tool is excluded from this subagent's visibility entirely,
+// not merely gated, because omp cannot prompt a headless subagent; see
+// renderToolsApprovalCommand for why granting it visibility without a
+// matching tools.approval entry would silently auto-allow it instead of
+// asking, via the subagent's own forced-yolo fallback).
+func renderAgentFile(a registry.Agent, body string, serverByName map[string]registry.MCPServer) string {
 	tools := append([]string{}, baseTools...)
 	if a.Permissions.Write == "allow" {
 		tools = append(tools, "write")
 	}
 	if a.Permissions.Edit == "allow" {
 		tools = append(tools, "edit", "ast_edit")
+	}
+	for _, m := range a.MCP {
+		server, ok := serverByName[m.Server]
+		if !ok || !targets(server.Targets) {
+			continue
+		}
+		asked := make(map[string]bool, len(m.Ask))
+		for _, t := range m.Ask {
+			asked[t] = true
+		}
+		for _, tool := range server.Tools {
+			if asked[tool] {
+				continue
+			}
+			tools = append(tools, mcpToolID(m.Server, tool))
+		}
 	}
 
 	var b strings.Builder
@@ -249,6 +285,112 @@ func translateDecision(d bashpolicy.Decision) string {
 		return "prompt"
 	}
 	return string(d)
+}
+
+// renderToolsApprovalCommand builds omp's tools.approval allow-list: the
+// only lever available to implement ask-by-default MCP approval, since
+// omp's tools.approvalMode is a single harness-wide setting (paired with
+// this via Render's "always-ask" command) and tools.approval itself has
+// no glob support (exact tool names only) and no per-agent scoping (one
+// map, shared by the interactive primary session and every subagent) —
+// both confirmed empirically against a live omp session, not documented
+// upstream.
+//
+// Because there is no per-agent scoping, an agent's mcp[].ask list can't
+// stay agent-local the way it does for opencode's per-agent permission
+// block: every agent's ask lists for a given server are unioned into one
+// harness-wide ask set for that server, and a GapReduction is recorded
+// wherever that aggregation actually discards per-agent granularity.
+// Every tool in a targeted server's Tools list NOT in its ask set is
+// allow-listed; everything else (ask-listed, or simply outside every
+// server's Tools list) is left unset and falls through to always-ask's
+// tier default — MCP tools all declare tier "write", so an unset one
+// already prompts with zero extra bookkeeping.
+//
+// task/write/edit/ast_edit are allow-listed too, conditionally: only when
+// some targeted agent's permissions actually grant them (task allow
+// means dispatching a subagent shouldn't itself need approval; write/
+// edit mirror whichever agent's frontmatter already grants them, e.g.
+// build — tools.approval has no per-agent split, so this also makes the
+// primary agent's own edit/write frictionless, a real trade-off with no
+// workaround given the single global map).
+func renderToolsApprovalCommand(reg *registry.Registry) (render.RunCommand, []render.Gap) {
+	askSet := map[string]map[string]bool{}
+	for _, a := range reg.Agents {
+		for _, m := range a.MCP {
+			if len(m.Ask) == 0 {
+				continue
+			}
+			if askSet[m.Server] == nil {
+				askSet[m.Server] = map[string]bool{}
+			}
+			for _, tool := range m.Ask {
+				askSet[m.Server][tool] = true
+			}
+		}
+	}
+
+	approval := map[string]string{}
+	var gaps []render.Gap
+	for _, s := range reg.MCPServers {
+		if !targets(s.Targets) || len(s.Tools) == 0 {
+			continue
+		}
+		asked := askSet[s.Name]
+		if len(asked) > 0 {
+			gaps = append(gaps, render.Gap{
+				Kind:       render.GapReduction,
+				Capability: render.CapMCPPerToolAsk,
+				Subject:    "mcp:" + s.Name,
+				Detail: fmt.Sprintf(
+					"mcp server %q's per-tool ask list is enforced harness-wide, not per agent — omp's tools.approval has no per-agent scoping, so every agent granted this server shares the same ask set.",
+					s.Name,
+				),
+			})
+		}
+		for _, tool := range s.Tools {
+			if asked[tool] {
+				continue
+			}
+			approval[mcpToolID(s.Name, tool)] = "allow"
+		}
+	}
+
+	for _, name := range builtinAlwaysAllow {
+		approval[name] = "allow"
+	}
+	if agentGrants(reg, func(p registry.Permissions) bool { return p.Task == "allow" }) {
+		approval["task"] = "allow"
+	}
+	if agentGrants(reg, func(p registry.Permissions) bool { return p.Write == "allow" }) {
+		approval["write"] = "allow"
+	}
+	if agentGrants(reg, func(p registry.Permissions) bool { return p.Edit == "allow" }) {
+		approval["edit"] = "allow"
+		approval["ast_edit"] = "allow"
+	}
+
+	approvalJSON, err := json.Marshal(approval)
+	if err != nil {
+		// map[string]string always marshals; unreachable in practice.
+		approvalJSON = []byte("{}")
+	}
+
+	return render.RunCommand{
+		Argv: []string{"omp", "config", "set", "tools.approval", string(approvalJSON)},
+		Why:  "sync MCP + built-in tool approval allow-list",
+	}, gaps
+}
+
+// agentGrants reports whether any agent targeting omp satisfies pred
+// against its own Permissions.
+func agentGrants(reg *registry.Registry, pred func(registry.Permissions) bool) bool {
+	for _, a := range reg.Agents {
+		if targets(a.Targets) && pred(a.Permissions) {
+			return true
+		}
+	}
+	return false
 }
 
 // renderMCPServer resolves one mcp_servers entry into omp's native mcp.json

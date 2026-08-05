@@ -38,9 +38,19 @@ const (
 	CapGlobalBashPolicy    Capability = "global_bash_policy"
 	CapExternalDirectory   Capability = "external_directory_policy"
 	CapMCPLocalTransport   Capability = "mcp_local_transport"
-	CapMCPToolGlobs        Capability = "mcp_tool_globs"
-	CapMCPPerToolAsk       Capability = "mcp_per_tool_ask"
-	CapProjectModelPolicy  Capability = "project_model_policy"
+	// CapMCPToolGlobs and CapMCPToolAllowlist are two independent ways a
+	// renderer can avoid the mcp_tool_globs gap on a server declaring
+	// mcp_servers[].tools: CapMCPToolGlobs means the harness grants whole
+	// namespaces by glob and gates specific tools via its own permission
+	// syntax, so an explicit Tools enumeration is redundant (opencode).
+	// CapMCPToolAllowlist means the harness has no glob support at all and
+	// instead consumes Tools directly as an exact-name allowlist (omp). A
+	// renderer declares whichever one actually describes how it uses (or
+	// doesn't need) the field — never both for the same reason.
+	CapMCPToolGlobs       Capability = "mcp_tool_globs"
+	CapMCPToolAllowlist   Capability = "mcp_tool_allowlist"
+	CapMCPPerToolAsk      Capability = "mcp_per_tool_ask"
+	CapProjectModelPolicy Capability = "project_model_policy"
 )
 
 // Options carries render-time inputs that aren't part of the registry

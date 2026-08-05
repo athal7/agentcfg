@@ -25,6 +25,7 @@ func DetectGaps(reg *registry.Registry, declared []Capability) []Gap {
 	gaps = append(gaps, detectPrimaryAgentGap(reg, has)...)
 	gaps = append(gaps, detectExternalDirectoryGaps(reg, has)...)
 	gaps = append(gaps, detectMCPToolGlobsGaps(reg, has)...)
+	gaps = append(gaps, detectMCPPerToolAskGaps(reg, has)...)
 	return gaps
 }
 
@@ -122,7 +123,7 @@ func detectExternalDirectoryGaps(reg *registry.Registry, has map[Capability]bool
 }
 
 func detectMCPToolGlobsGaps(reg *registry.Registry, has map[Capability]bool) []Gap {
-	if has[CapMCPToolGlobs] {
+	if has[CapMCPToolGlobs] || has[CapMCPToolAllowlist] {
 		return nil
 	}
 	var gaps []Gap
@@ -139,6 +140,36 @@ func detectMCPToolGlobsGaps(reg *registry.Registry, has map[Capability]bool) []G
 				s.Name,
 			),
 		})
+	}
+	return gaps
+}
+
+// detectMCPPerToolAskGaps reports an agent's mcp[].ask patterns as a
+// dropped feature for a renderer that doesn't declare CapMCPPerToolAsk at
+// all. A renderer that DOES declare it but only at reduced fidelity (e.g.
+// omp's harness-wide, not per-agent, aggregation) emits its own bespoke
+// GapReduction directly from Render — this generic check only covers the
+// silent-drop case.
+func detectMCPPerToolAskGaps(reg *registry.Registry, has map[Capability]bool) []Gap {
+	if has[CapMCPPerToolAsk] {
+		return nil
+	}
+	var gaps []Gap
+	for _, a := range reg.Agents {
+		for _, m := range a.MCP {
+			if len(m.Ask) == 0 {
+				continue
+			}
+			gaps = append(gaps, Gap{
+				Kind:       GapSkip,
+				Capability: CapMCPPerToolAsk,
+				Subject:    fmt.Sprintf("agent:%s.mcp:%s", a.Name, m.Server),
+				Detail: fmt.Sprintf(
+					"agent %q sets mcp[].ask for server %q; this harness has no per-tool ask mechanism, so those tools are granted without an extra confirmation step.",
+					a.Name, m.Server,
+				),
+			})
+		}
 	}
 	return gaps
 }

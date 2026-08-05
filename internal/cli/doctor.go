@@ -38,6 +38,7 @@ var allCapabilities = []render.Capability{
 	render.CapExternalDirectory,
 	render.CapMCPLocalTransport,
 	render.CapMCPToolGlobs,
+	render.CapMCPToolAllowlist,
 	render.CapMCPPerToolAsk,
 	render.CapProjectModelPolicy,
 }
@@ -139,14 +140,28 @@ func printCapabilityMatrix(w io.Writer, targets []render.Renderer, caps []render
 	tw.Flush()
 }
 
+// printRegistryGaps renders each target and reports the full Plan.Gaps —
+// not just render.DetectGaps' generic, registry-shape-only checks.
+// DetectGaps alone misses every gap a renderer only discovers mid-render
+// (e.g. omp's tools.approval reduction when an mcp[].ask list is
+// aggregated harness-wide, or a resolveFailureGap from a bad MCP
+// transport value) — Render() already calls DetectGaps internally and
+// appends its own bespoke gaps on top, so calling it here is a strict
+// superset, not a duplicate. Render is documented pure (reads only, no
+// writes/exec/network beyond resolving a registry.Value), so this stays
+// safe to run from a read-only diagnostic command.
 func printRegistryGaps(w io.Writer, targets []render.Renderer, reg *registry.Registry) {
 	for _, r := range targets {
-		gaps := render.DetectGaps(reg, r.Capabilities())
-		if len(gaps) == 0 {
+		plan, err := r.Render(reg, render.Options{RegistryRoot: reg.RootDir})
+		if err != nil {
+			fmt.Fprintf(w, "%s: could not render (%v); gap analysis unavailable\n", r.ID(), err)
+			continue
+		}
+		if len(plan.Gaps) == 0 {
 			fmt.Fprintf(w, "%s: no gaps\n", r.ID())
 			continue
 		}
-		for _, g := range gaps {
+		for _, g := range plan.Gaps {
 			fmt.Fprintf(w, "%s  %s  %s  %s\n", r.ID(), g.Kind, g.Capability, g.Subject)
 			fmt.Fprintf(w, "    %s\n", g.Detail)
 		}

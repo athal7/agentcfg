@@ -105,7 +105,11 @@ func applyWriteFile(w render.WriteFile) (applied, skipped string, err error) {
 		return "", "", err
 	}
 
-	if isGitTracked(path) {
+	tracked, err := isGitTracked(path)
+	if err != nil {
+		return "", "", err
+	}
+	if tracked {
 		return "", fmt.Sprintf("skipped: %s is git-tracked", path), nil
 	}
 
@@ -130,9 +134,9 @@ func writeFileContent(path string, content []byte, mode fs.FileMode) error {
 	return nil
 }
 
-// applyRebuildDir prunes every file matching r.Glob under r.Dir, then
-// writes every r.Files entry, as one unit — so an agent removed from the
-// registry doesn't leave a stale file behind. Individual files are not
+// applyRebuildDir writes every r.Files entry first, then prunes every file
+// matching r.Glob under r.Dir that isn't in r.Files — as one unit, so a
+// write failure never leaves stale files behind. Individual files are not
 // git-guarded: RebuildDir only ever targets renderer-owned directories
 // (e.g. an omp agents/ directory), never a file a user might hand-edit and
 // commit.
@@ -145,20 +149,31 @@ func applyRebuildDir(r render.RebuildDir) (applied, skipped string, err error) {
 		return "", "", fmt.Errorf("creating directory %s: %w", dir, err)
 	}
 
-	stale, err := filepath.Glob(filepath.Join(dir, r.Glob))
-	if err != nil {
-		return "", "", fmt.Errorf("globbing %s: %w", filepath.Join(dir, r.Glob), err)
-	}
-	for _, f := range stale {
-		if err := os.Remove(f); err != nil {
-			return "", "", fmt.Errorf("removing stale file %s: %w", f, err)
-		}
-	}
-
+	// Write all replacement files first. If any write fails, no stale
+	// files have been removed yet — the directory is still in its
+	// pre-apply state.
 	for _, f := range r.Files {
 		path := filepath.Join(dir, f.Path)
 		if err := writeFileContent(path, f.Content, f.Mode); err != nil {
 			return "", "", err
+		}
+	}
+
+	// Now remove stale files that aren't in the replacement set.
+	stale, err := filepath.Glob(filepath.Join(dir, r.Glob))
+	if err != nil {
+		return "", "", fmt.Errorf("globbing %s: %w", filepath.Join(dir, r.Glob), err)
+	}
+	// Build a set of replacement file basenames for O(1) lookup.
+	replaced := make(map[string]bool, len(r.Files))
+	for _, f := range r.Files {
+		replaced[filepath.Base(f.Path)] = true
+	}
+	for _, f := range stale {
+		if !replaced[filepath.Base(f)] {
+			if err := os.Remove(f); err != nil {
+				return "", "", fmt.Errorf("removing stale file %s: %w", f, err)
+			}
 		}
 	}
 

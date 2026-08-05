@@ -7,6 +7,16 @@ import (
 	"github.com/athal7/agentcfg/internal/render"
 )
 
+func TestApplyRunCommand_EmptyArgvReturnsError(t *testing.T) {
+	_, _, err := applyRunCommand(render.RunCommand{
+		Argv: []string{},
+		Why:  "should not run",
+	})
+	if err == nil {
+		t.Fatalf("expected error for empty Argv, got nil")
+	}
+}
+
 func TestApplyRunCommand_SuccessReturnsAppliedDescription(t *testing.T) {
 	applied, skipped, err := applyRunCommand(render.RunCommand{
 		Argv: []string{"true"},

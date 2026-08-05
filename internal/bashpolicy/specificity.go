@@ -44,13 +44,17 @@ func Score(pattern string) SortKey {
 				end++
 			}
 			if end < len(runes) {
-				end++ // consume the closing ]
+				// Terminated bracket expression: one wildcard token.
+				wildcardCount++
+				if isFirst {
+					startsWithWildcard = true
+				}
+				i = end + 1
+			} else {
+				// Unterminated bracket: treat '[' as a literal character.
+				literalCount++
+				i++
 			}
-			wildcardCount++
-			if isFirst {
-				startsWithWildcard = true
-			}
-			i = end
 		default:
 			literalCount++
 			i++

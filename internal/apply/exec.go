@@ -13,6 +13,9 @@ import (
 // the command's captured output is ever included in a returned error or
 // applied description, on success or failure.
 func applyRunCommand(r render.RunCommand) (applied, skipped string, err error) {
+	if len(r.Argv) == 0 {
+		return "", "", fmt.Errorf("run command: argv is empty")
+	}
 	cmd := exec.Command(r.Argv[0], r.Argv[1:]...)
 	var out bytes.Buffer
 	cmd.Stdout = &out

@@ -48,7 +48,11 @@ func TestIsGitTracked_TrackedFile(t *testing.T) {
 	}
 	gitAdd(t, dir, "tracked.txt")
 
-	if !isGitTracked(path) {
+	tracked, err := isGitTracked(path)
+	if err != nil {
+		t.Fatalf("isGitTracked returned error: %v", err)
+	}
+	if !tracked {
 		t.Errorf("isGitTracked(%q) = false, want true", path)
 	}
 }
@@ -63,7 +67,11 @@ func TestIsGitTracked_UntrackedFileInRepo(t *testing.T) {
 	}
 	// Deliberately not added/committed.
 
-	if isGitTracked(path) {
+	tracked, err := isGitTracked(path)
+	if err != nil {
+		t.Fatalf("isGitTracked returned error: %v", err)
+	}
+	if tracked {
 		t.Errorf("isGitTracked(%q) = true, want false (never added)", path)
 	}
 }
@@ -76,7 +84,11 @@ func TestIsGitTracked_NotAGitRepoAtAll(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	if isGitTracked(path) {
+	tracked, err := isGitTracked(path)
+	if err != nil {
+		t.Fatalf("isGitTracked returned error: %v", err)
+	}
+	if tracked {
 		t.Errorf("isGitTracked(%q) = true, want false (not a git repo)", path)
 	}
 }
@@ -89,7 +101,73 @@ func TestIsGitTracked_FileDoesNotExistYetInRepo(t *testing.T) {
 	// apply is about to create a brand-new file.
 	path := filepath.Join(dir, "not-yet-created.txt")
 
-	if isGitTracked(path) {
+	tracked, err := isGitTracked(path)
+	if err != nil {
+		t.Fatalf("isGitTracked returned error: %v", err)
+	}
+	if tracked {
 		t.Errorf("isGitTracked(%q) = true, want false (file doesn't exist)", path)
+	}
+}
+
+func TestIsGitTracked_DeletedParentDirReturnsFalseNil(t *testing.T) {
+	// When the parent directory is gone, the file can't possibly be
+	// tracked. Return (false, nil) so apply proceeds with the write.
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	path := filepath.Join(dir, "tracked.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	gitAdd(t, dir, "tracked.txt")
+
+	// Delete the parent directory — the file is still tracked in git,
+	// but the path no longer exists on disk.
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+
+	// Parent dir is gone → file can't be tracked → (false, nil).
+	tracked, err := isGitTracked(path)
+	if err != nil {
+		t.Errorf("isGitTracked(%q) = (_, %v), want (false, nil) when parent dir is gone", path, err)
+	}
+	if tracked {
+		t.Errorf("isGitTracked(%q) = (true, nil), want (false, nil) when parent dir is gone", path)
+	}
+}
+
+func TestIsGitTracked_TrackedFileDeletedFromIndexStillDetected(t *testing.T) {
+	// When a file was tracked but deleted from the working tree (and
+	// also removed from the index), git ls-files --error-unmatch fails.
+	// This is a "confirmed not tracked" result.
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	path := filepath.Join(dir, "tracked.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	gitAdd(t, dir, "tracked.txt")
+
+	// Remove from index and working tree.
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+	run("rm", "--cached", "tracked.txt")
+	os.Remove(path)
+
+	tracked, err := isGitTracked(path)
+	if err != nil {
+		t.Fatalf("isGitTracked returned error: %v", err)
+	}
+	if tracked {
+		t.Errorf("isGitTracked(%q) = true, want false (removed from index)", path)
 	}
 }

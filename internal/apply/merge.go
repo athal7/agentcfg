@@ -49,7 +49,11 @@ func applyMerge(
 		return "", "", err
 	}
 
-	if isGitTracked(expanded) {
+	tracked, err := isGitTracked(expanded)
+	if err != nil {
+		return "", "", err
+	}
+	if tracked {
 		return "", fmt.Sprintf("skipped: %s is git-tracked", expanded), nil
 	}
 

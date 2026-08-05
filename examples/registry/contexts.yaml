@@ -1,0 +1,5 @@
+contexts:
+  - match:
+      git_remote_owner: athal7
+    model_classes:
+      default: anthropic/claude-opus-4-1

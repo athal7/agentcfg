@@ -1,0 +1,105 @@
+git status
+git status --short
+git status -s
+git status --porcelain
+git commit -m "fix"
+git commit -am "wip"
+git commit --amend
+git commit -am "wip: more changes"
+git push origin main
+git push --force
+git push -f origin feature-branch
+git log --oneline
+git log -n 10
+git diff
+git diff --staged
+git add .
+git add -A
+git checkout main
+git checkout -b feature/foo
+git branch -d old-branch
+git rebase main
+git stash
+git stash pop
+git fetch origin
+git pull origin main
+git merge feature/foo
+git tag v1.0.0
+git remote -v
+git clone https://github.com/foo/bar.git
+gh run view 123
+gh run view 123 --log
+gh run list
+gh api repos/foo/deployments
+gh api repos/foo/bar/pulls
+gh pr create
+gh pr create --title "fix" --body "desc"
+gh pr view 42
+gh pr merge 42
+gh issue create
+gh issue list
+gh repo clone foo/bar
+gh auth token
+rm -rf /
+rm -rf /*
+rm -rf ~/Documents
+rm -rf ~/Downloads/old
+rm -rf ./build
+rm -rf node_modules
+sudo apt install foo
+sudo apt-get update
+sudo rm -rf /var
+sudo systemctl restart nginx
+sudo reboot
+dd if=/dev/zero of=/dev/disk1
+dd if=/dev/urandom of=file.bin bs=1M count=10
+curl https://example.com -X POST -d data
+curl -s https://example.com/api | jq .
+wget https://example.com/file
+wget -O out.tar.gz https://example.com/archive.tar.gz
+ls -la
+ls -la /tmp
+cat file.txt
+cat /etc/hosts
+pwd
+cd /tmp
+cd ..
+echo hello
+echo "hello world" > out.txt
+find . -name "*.go"
+find . -type f -mtime -1
+grep -r foo .
+grep -rn TODO src/
+head -20 file
+head -n 5 out.log
+wc -l file
+wc -w README.md
+mkdir newdir
+mkdir -p a/b/c
+touch file.txt
+touch -a old.txt
+npm install
+npm install --save-dev eslint
+npm run build
+npm test
+go build ./...
+go test ./...
+go test ./... -v
+go vet ./...
+gofmt -l .
+go mod tidy
+python3 script.py
+python3 -m venv .venv
+docker build -t myimage .
+docker run --rm myimage
+docker ps -a
+kubectl get pods
+kubectl apply -f deploy.yaml
+tar -czf archive.tar.gz dir/
+unzip archive.zip
+chmod +x script.sh
+chown user:group file.txt
+ps aux
+kill -9 1234
+df -h
+du -sh .

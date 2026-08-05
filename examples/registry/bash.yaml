@@ -1,0 +1,15 @@
+bash:
+  default_lists: [guardrails]
+  lists:
+    guardrails:
+      "rm -rf /*": ask
+      "sudo *": ask
+    git:
+      "git commit*": ask
+      "git status*": allow
+  profiles:
+    global:
+      base: allow
+    lead:
+      base: allow
+      lists: [git]

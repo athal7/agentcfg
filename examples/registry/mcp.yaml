@@ -1,0 +1,4 @@
+mcp_servers:
+  - name: context7
+    transport: remote
+    url: https://mcp.context7.com/mcp

@@ -1,0 +1,33 @@
+agents:
+  - name: lead
+    description: "Primary orchestrator"
+    mode: primary
+    class: big
+    prompt:
+      text: "You are the lead agent coordinating work across subagents."
+    permissions:
+      task: allow
+      edit: deny
+      write: deny
+      bash:
+        profile: lead
+      external_directory:
+        "*": ask
+        "~/code/**": allow
+
+  - name: build
+    description: "Implements changes"
+    mode: subagent
+    class: default
+    steps: 40
+    prompt:
+      text: "You implement code changes following TDD."
+    permissions:
+      task: deny
+      edit: allow
+      write: allow
+      bash:
+        profile: lead
+    mcp:
+      - server: context7
+        ask: ["resolve-library-id"]

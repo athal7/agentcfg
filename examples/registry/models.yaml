@@ -1,0 +1,4 @@
+model_classes:
+  default: anthropic/claude-sonnet-4-5
+  smol: anthropic/claude-haiku-4-5
+  big: anthropic/claude-opus-4-1

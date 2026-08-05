@@ -127,7 +127,7 @@ func detectMCPToolGlobsGaps(reg *registry.Registry, has map[Capability]bool) []G
 	}
 	var gaps []Gap
 	for _, s := range reg.MCPServers {
-		if len(s.Tools) > 0 {
+		if len(s.Tools) == 0 {
 			continue
 		}
 		gaps = append(gaps, Gap{

@@ -183,7 +183,7 @@ func TestRender_GapsForUndeclaredCapabilities(t *testing.T) {
 			},
 		},
 		MCPServers: []registry.MCPServer{
-			{Name: "github", Transport: "local", Command: []registry.Value{{Literal: "gh-mcp"}}},
+			{Name: "github", Transport: "local", Command: []registry.Value{{Literal: "gh-mcp"}}, Tools: []string{"repo_read"}},
 		},
 	}
 	reg.Bash.Profiles["readonly"] = registry.BashProfile{Base: registry.Deny}

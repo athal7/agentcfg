@@ -60,12 +60,15 @@ func runApplyCmd(cmd *cobra.Command, opts applyOptions) error {
 	strictFromFlag := cmd.Flags().Changed("strict")
 	bestEffortFromEnv := os.Getenv("AGENTCFG_BEST_EFFORT") == "1"
 
-	bestEffort := opts.bestEffort || bestEffortFromEnv
-
-	switch {
-	case bestEffortFromFlag && opts.bestEffort && strictFromFlag:
+	if bestEffortFromFlag && opts.bestEffort && strictFromFlag {
 		return fmt.Errorf("apply: --strict and --best-effort are mutually exclusive")
-	case !bestEffortFromFlag && bestEffortFromEnv && strictFromFlag:
+	}
+
+	bestEffort := bestEffortFromEnv
+	if bestEffortFromFlag {
+		bestEffort = opts.bestEffort
+	}
+	if strictFromFlag {
 		bestEffort = false
 	}
 

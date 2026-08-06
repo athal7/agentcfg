@@ -899,6 +899,107 @@ agents:
 	}
 }
 
+func TestValidate_PromptFileAbsolutePathRejected(t *testing.T) {
+	// An absolute prompt.file path must be rejected as a traversal
+	// violation, not silently treated as relative-to-root.
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+agents:
+  - name: lead
+    class: default
+    prompt: { file: "/etc/prompt.md" }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, "prompt file escapes registry root") {
+		t.Errorf("errs = %v, want a path-traversal rejection error for absolute path", errs)
+	}
+}
+
+func TestValidate_PromptFileSymlinkOutsideRootRejected(t *testing.T) {
+	// A symlink inside the registry root that points outside the root
+	// must be rejected as a traversal violation.
+	dir := t.TempDir()
+
+	// Create a target file outside the registry root.
+	externalDir := filepath.Join(dir, "external")
+	if err := os.MkdirAll(externalDir, 0o755); err != nil {
+		t.Fatalf("create external dir: %v", err)
+	}
+	externalPrompt := filepath.Join(externalDir, "prompt.md")
+	if err := os.WriteFile(externalPrompt, []byte("outside root"), 0o644); err != nil {
+		t.Fatalf("write external prompt: %v", err)
+	}
+
+	// Create the registry directory with a symlink pointing outside.
+	regDir := filepath.Join(dir, "registry")
+	if err := os.MkdirAll(regDir, 0o755); err != nil {
+		t.Fatalf("create registry dir: %v", err)
+	}
+
+	// Write agentcfg.yaml with a symlinked prompt path.
+	agentcfgYAML := `
+version: 1
+imports:
+  - models.yaml
+  - bash.yaml
+  - bash.d/*.yaml
+  - mcp.yaml
+  - agents.yaml
+  - contexts.yaml
+harnesses:
+  opencode:
+    out: ~/.config/opencode/opencode.json
+  omp:
+    agents_dir: ~/.omp/agent/agents
+    bash_profile: global
+`
+	if err := os.WriteFile(filepath.Join(regDir, "agentcfg.yaml"), []byte(agentcfgYAML), 0o644); err != nil {
+		t.Fatalf("write agentcfg.yaml: %v", err)
+	}
+
+	// Write minimal supporting files.
+	for name, content := range map[string]string{
+		"models.yaml":   "model_classes:\n  default: anthropic/claude-sonnet-5\n  smol: anthropic/claude-haiku-4-5\n",
+		"bash.yaml":     "bash:\n  default_lists: [guardrails]\n  profiles:\n    global: { base: allow }\n",
+		"mcp.yaml":      "mcp_servers:\n  - name: context7\n    transport: remote\n    url: https://mcp.context7.com/mcp\n",
+		"contexts.yaml": "contexts:\n  - match: { git_remote_owner: test }\n    model_classes:\n      default: anthropic/claude-sonnet-5\n",
+	} {
+		if err := os.WriteFile(filepath.Join(regDir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	// Create the symlink inside the registry pointing outside.
+	promptsDir := filepath.Join(regDir, "prompts")
+	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+		t.Fatalf("create prompts dir: %v", err)
+	}
+	if err := os.Symlink(externalPrompt, filepath.Join(promptsDir, "lead.md")); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	agentsYAML := `
+agents:
+  - name: lead
+    class: default
+    prompt: { file: prompts/lead.md }
+`
+	if err := os.WriteFile(filepath.Join(regDir, "agents.yaml"), []byte(agentsYAML), 0o644); err != nil {
+		t.Fatalf("write agents.yaml: %v", err)
+	}
+
+	_, errs, _, err := registry.Load(regDir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, "prompt file escapes registry root") {
+		t.Errorf("errs = %v, want a path-traversal rejection error for symlink escaping root", errs)
+	}
+}
+
 func TestValidate_PromptFileRelativeInRootStillWorks(t *testing.T) {
 	files := minimalFixtureFiles()
 	// A normal relative path inside the registry should still resolve fine.

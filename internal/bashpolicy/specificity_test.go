@@ -197,7 +197,7 @@ func TestScore_UnterminatedBracketIsLiteral(t *testing.T) {
 	if got.WildcardCount != 0 {
 		t.Errorf("WildcardCount = %d, want 0", got.WildcardCount)
 	}
-	// "[abc" is 5 runes but Score counts '[' as 1 literal + 'abc' as 3 = 4.
+	// "[abc" is 4 runes but Score counts '[' as 1 literal + 'abc' as 3 = 4.
 	if got.LiteralCount != 4 {
 		t.Errorf("LiteralCount = %d, want 4", got.LiteralCount)
 	}

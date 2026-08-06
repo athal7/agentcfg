@@ -27,11 +27,38 @@ func TestRunApplyCmd_BestEffortFalseStrictNoError(t *testing.T) {
 	// a conflict with --strict — the user is explicitly disabling
 	// best-effort, so strict mode is the only active mode.
 	err := runApplyCmd(cmd, opts)
-	// We expect an error from the actual apply logic (no registry),
-	// NOT from the mutual-exclusion check. If the mutual-exclusion
-	// check fires, the error message will contain "mutually exclusive".
-	if err != nil && err.Error() == "apply: --strict and --best-effort are mutually exclusive" {
+	// Two-step assertion: first confirm we got an error (no registry
+	// means apply logic will fail), then confirm it is NOT the
+	// mutual-exclusion error.
+	if err == nil {
+		t.Fatal("expected error from apply logic (no registry), got nil")
+	}
+	if err.Error() == "apply: --strict and --best-effort are mutually exclusive" {
 		t.Error("--best-effort=false --strict should not be rejected as mutually exclusive")
+	}
+}
+
+func TestRunApplyCmd_BestEffortFalseFlagOverridesEnv(t *testing.T) {
+	t.Setenv("AGENTCFG_BEST_EFFORT", "1")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().BoolVar(new(bool), "best-effort", false, "")
+
+	// Explicitly set --best-effort=false while env says true.
+	if err := cmd.Flags().Set("best-effort", "false"); err != nil {
+		t.Fatalf("Set best-effort: %v", err)
+	}
+
+	opts := applyOptions{
+		bestEffort: false,
+	}
+
+	err := runApplyCmd(cmd, opts)
+	// The explicit --best-effort=false flag must override the env var,
+	// so we go through the normal apply path which will fail (no
+	// registry). If best-effort were incorrectly true, we'd get nil.
+	if err == nil {
+		t.Fatal("expected error from normal apply path (flag --best-effort=false should override env), got nil")
 	}
 }
 

@@ -56,7 +56,7 @@ func Load(registryDir string) (*Registry, []ValidationError, []ValidationWarning
 		// case. A parent directory that doesn't exist at all (e.g. an
 		// optional bash.d/*.yaml split a registry never opted into) is a
 		// normal, silent no-op, not a mistake worth flagging.
-		if len(paths) == 0 && strings.Contains(pattern, "*") {
+		if len(paths) == 0 && strings.ContainsAny(pattern, "*?[") {
 			if parentInfo, statErr := os.Stat(filepath.Dir(filepath.Join(dir, pattern))); statErr == nil && parentInfo.IsDir() {
 				vWarns = append(vWarns, ValidationWarning{
 					Message: fmt.Sprintf("import glob %q matched no files", pattern),

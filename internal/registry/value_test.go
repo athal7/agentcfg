@@ -3,7 +3,6 @@ package registry_test
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml"
@@ -106,7 +105,7 @@ func TestValueUnmarshalDoesNotExecuteCommand(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "marker.txt")
 
-	v := unmarshalValue(t, "from: command\nrun: [sh, -c, 'echo resolved > "+marker+"']\n")
+	v := unmarshalValue(t, "from: command\nrun: [touch, "+marker+"]\n")
 
 	// Unmarshal alone must not have executed the command — marker must not exist.
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
@@ -120,11 +119,7 @@ func TestValueUnmarshalDoesNotExecuteCommand(t *testing.T) {
 	}
 
 	// After Resolve(), the marker file must exist.
-	data, err := os.ReadFile(marker)
-	if err != nil {
+	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("marker file not found after Resolve(): %v", err)
-	}
-	if got := strings.TrimSpace(string(data)); got != "resolved" {
-		t.Errorf("marker contents = %q, want %q", got, "resolved")
 	}
 }

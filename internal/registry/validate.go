@@ -52,6 +52,9 @@ func isValidDecision(d Decision) bool {
 func validateAgents(reg *Registry) []ValidationError {
 	var errs []ValidationError
 
+	// Cache the real (symlink-resolved) root path once, outside the loop.
+	rootReal, _ := filepath.EvalSymlinks(reg.RootDir)
+
 	seenNames := map[string]bool{}
 	primaryCount := 0
 
@@ -96,9 +99,8 @@ func validateAgents(reg *Registry) []ValidationError {
 				Message: fmt.Sprintf("agent %q must set exactly one of prompt.file or prompt.text, not both", a.Name),
 			})
 		case a.Prompt.File != "":
-			resolved := filepath.Join(reg.RootDir, a.Prompt.File)
-			rel, err := filepath.Rel(reg.RootDir, resolved)
-			if err != nil || filepath.IsAbs(rel) || rel == ".." || len(rel) > 2 && rel[:3] == ".."+string(filepath.Separator) {
+			violates, resolved := promptFileTraversal(reg.RootDir, rootReal, a.Prompt.File)
+			if violates {
 				errs = append(errs, ValidationError{
 					Message: fmt.Sprintf("prompt file escapes registry root: %s", a.Prompt.File),
 				})

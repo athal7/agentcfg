@@ -18,6 +18,7 @@ import (
 // Decision is a bash command policy outcome.
 type Decision string
 
+// Bash policy decision outcomes.
 const (
 	Allow Decision = "allow"
 	Deny  Decision = "deny"
@@ -48,7 +49,7 @@ type HarnessConfig struct {
 
 // BashPolicy is the content of bash.yaml (merged with bash.d/*.yaml).
 type BashPolicy struct {
-	DefaultLists []string                       `yaml:"default_lists,omitempty"`
+	DefaultLists *[]string                      `yaml:"default_lists,omitempty"`
 	Lists        map[string]map[string]Decision `yaml:"lists,omitempty"`
 	Profiles     map[string]BashProfile         `yaml:"profiles,omitempty"`
 }
@@ -266,6 +267,7 @@ type ValidationError struct {
 	Message string
 }
 
+// Error implements the error interface for ValidationError.
 func (e ValidationError) Error() string { return e.Message }
 
 // ValidationWarning is a non-fatal advisory finding (e.g. an MCP-proxy

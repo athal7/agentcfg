@@ -19,6 +19,8 @@ import (
 // otherwise be silently dropped.
 type Capability string
 
+// Capability constants enumerate every registry feature a renderer may or may
+// not be able to express in its target harness's native configuration.
 const (
 	CapAgentDefinitions    Capability = "agent_definitions"
 	CapPrimaryAgent        Capability = "primary_agent"
@@ -38,6 +40,7 @@ const (
 	CapGlobalBashPolicy    Capability = "global_bash_policy"
 	CapExternalDirectory   Capability = "external_directory_policy"
 	CapMCPLocalTransport   Capability = "mcp_local_transport"
+	CapMCPRemoteTransport  Capability = "mcp_remote_transport"
 	CapMCPToolGlobs        Capability = "mcp_tool_globs"
 	CapMCPPerToolAsk       Capability = "mcp_per_tool_ask"
 	CapProjectModelPolicy  Capability = "project_model_policy"
@@ -82,6 +85,8 @@ type ProjectScopeRenderer interface {
 // skipped, or the renderer produced a reduced/alternative expression of it.
 type GapKind string
 
+// GapKind constants categorize how a renderer handled a registry feature it
+// couldn't fully express: silently skipped or reduced to an alternative form.
 const (
 	GapSkip      GapKind = "skip"
 	GapReduction GapKind = "reduction"
@@ -118,6 +123,7 @@ type WriteFile struct {
 	Content []byte
 }
 
+// Describe returns a one-line summary of the file write for --explain output.
 func (w WriteFile) Describe() string {
 	return fmt.Sprintf("write %s (%d bytes, mode %s)", w.Path, len(w.Content), w.Mode)
 }
@@ -133,6 +139,7 @@ type MergeJSON struct {
 	Object  map[string]any
 }
 
+// Describe returns a one-line summary of the JSON merge for --explain output.
 func (m MergeJSON) Describe() string {
 	return fmt.Sprintf("merge JSON into %s (managed: %v)", m.Path, m.Managed)
 }
@@ -145,6 +152,7 @@ type MergeYAML struct {
 	Object  map[string]any
 }
 
+// Describe returns a one-line summary of the YAML merge for --explain output.
 func (m MergeYAML) Describe() string {
 	return fmt.Sprintf("merge YAML into %s (managed: %v)", m.Path, m.Managed)
 }
@@ -157,6 +165,7 @@ type MergeTOML struct {
 	Object  map[string]any
 }
 
+// Describe returns a one-line summary of the TOML merge for --explain output.
 func (m MergeTOML) Describe() string {
 	return fmt.Sprintf("merge TOML into %s (managed: %v)", m.Path, m.Managed)
 }
@@ -170,6 +179,7 @@ type RebuildDir struct {
 	Files []WriteFile
 }
 
+// Describe returns a one-line summary of the directory rebuild for --explain output.
 func (r RebuildDir) Describe() string {
 	return fmt.Sprintf("rebuild %s/%s (%d files)", r.Dir, r.Glob, len(r.Files))
 }
@@ -183,6 +193,7 @@ type RunCommand struct {
 	Secret bool
 }
 
+// Describe returns a one-line summary of the command execution for --explain output.
 func (r RunCommand) Describe() string {
 	if r.Secret {
 		return fmt.Sprintf("run %s (%s) [output redacted]", r.Argv[0], r.Why)

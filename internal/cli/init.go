@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// starterAgentcfgYAML is the scaffold contents init writes for agentcfg.yaml.
 const starterAgentcfgYAML = `version: 1
 imports:
   - models.yaml
@@ -21,6 +22,7 @@ harnesses:
     agents_dir: ~/.omp/agent/agents
 `
 
+// starterModelsYAML is the scaffold contents init writes for models.yaml.
 const starterModelsYAML = `model_classes:
   default: anthropic/claude-sonnet-4-5
   smol: anthropic/claude-haiku-4-5
@@ -39,6 +41,7 @@ const starterBashYAML = `bash:
       base: allow
 `
 
+// starterAgentsYAML is the scaffold contents init writes for agents.yaml.
 const starterAgentsYAML = `agents:
   - name: lead
     mode: primary
@@ -47,6 +50,7 @@ const starterAgentsYAML = `agents:
       text: "You are a helpful assistant."
 `
 
+// newInitCmd builds the init command that scaffolds a new registry.
 func newInitCmd() *cobra.Command {
 	var registryFlag string
 

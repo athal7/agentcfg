@@ -12,6 +12,7 @@ import (
 	"github.com/athal7/agentcfg/internal/renderers"
 )
 
+// newExplainCmd builds the explain parent command.
 func newExplainCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "explain",
@@ -21,6 +22,7 @@ func newExplainCmd() *cobra.Command {
 	return cmd
 }
 
+// newExplainBashCmd builds the explain bash subcommand that compares bash policy decisions across targets.
 func newExplainBashCmd() *cobra.Command {
 	var registryFlag, command, targetFlag string
 
@@ -74,10 +76,12 @@ func runExplainBash(out io.Writer, registryFlag, targetFlag, command string) err
 	}
 
 	var rows []bashExplainRow
+	var errors []string
 	for _, r := range targets {
 		row, matched, err := resolveBashRow(reg, r, command)
 		if err != nil {
 			fmt.Fprintf(out, "%s  error: %v\n", r.ID(), err)
+			errors = append(errors, r.ID())
 			continue
 		}
 		if !matched {
@@ -89,6 +93,9 @@ func runExplainBash(out io.Writer, registryFlag, targetFlag, command string) err
 
 	if len(rows) == 0 {
 		fmt.Fprintln(out, "no target resolved a decision for this command")
+		for _, e := range errors {
+			fmt.Fprintf(out, "! %s: target excluded (resolution error)\n", e)
+		}
 		return nil
 	}
 
@@ -102,6 +109,12 @@ func runExplainBash(out io.Writer, registryFlag, targetFlag, command string) err
 		fmt.Fprintln(out, "✓ agree")
 	} else {
 		fmt.Fprintln(out, "✗ disagree")
+	}
+
+	if len(errors) > 0 {
+		for _, e := range errors {
+			fmt.Fprintf(out, "! %s: target excluded (resolution error)\n", e)
+		}
 	}
 	return nil
 }
@@ -180,6 +193,7 @@ func displayDecision(targetID string, d bashpolicy.Decision) string {
 	return string(d)
 }
 
+// hasCapability reports whether renderer r declares capability want.
 func hasCapability(r render.Renderer, want render.Capability) bool {
 	for _, c := range r.Capabilities() {
 		if c == want {

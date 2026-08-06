@@ -1,6 +1,7 @@
 package contextres
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -97,7 +98,7 @@ func initRepo(t *testing.T, dir string) {
 func TestResolve_NotAGitRepoAtAll(t *testing.T) {
 	dir := t.TempDir()
 
-	got, err := Resolve(dir)
+	got, err := Resolve(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("Resolve returned error: %v", err)
 	}
@@ -110,7 +111,7 @@ func TestResolve_RepoWithNoOriginRemote(t *testing.T) {
 	dir := t.TempDir()
 	initRepo(t, dir)
 
-	got, err := Resolve(dir)
+	got, err := Resolve(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("Resolve returned error: %v", err)
 	}
@@ -124,7 +125,7 @@ func TestResolve_RepoWithOriginRemote(t *testing.T) {
 	initRepo(t, dir)
 	runGit(t, dir, "remote", "add", "origin", "git@github.com:athal7/agentcfg.git")
 
-	got, err := Resolve(dir)
+	got, err := Resolve(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("Resolve returned error: %v", err)
 	}
@@ -144,7 +145,7 @@ func TestResolve_WorksFromSubdirectoryOfRepo(t *testing.T) {
 		t.Fatalf("os.MkdirAll: %v", err)
 	}
 
-	got, err := Resolve(subdir)
+	got, err := Resolve(context.Background(), subdir)
 	if err != nil {
 		t.Fatalf("Resolve returned error: %v", err)
 	}

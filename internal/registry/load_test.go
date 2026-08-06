@@ -213,10 +213,113 @@ model_classes:
 	}
 }
 
-func TestLoad_LocalYAMLAbsentIsFine(t *testing.T) {
+func TestLoad_VersionCollisionAcrossNonLocalFiles(t *testing.T) {
 	files := minimalFixtureFiles()
+	files["agentcfg.yaml"] = `
+version: 1
+imports:
+  - models.yaml
+  - bash.yaml
+  - agents.yaml
+`
+	files["models.yaml"] = `
+version: 2
+model_classes:
+  default: anthropic/claude-sonnet-5
+  smol:    anthropic/claude-haiku-4-5
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("expected soft validation error, got hard error: %v", err)
+	}
+	if !anyErrorContains(errs, "version declared in both") {
+		t.Errorf("errs = %v, want one mentioning duplicate version", errs)
+	}
+}
+
+func TestLoad_LocalYAMLOverridesVersion(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["local.yaml"] = `
+version: 99
+`
+	reg, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("unexpected validation errors: %v", errs)
+	}
+	if reg.Version != 99 {
+		t.Errorf("Version = %d, want 99 (local.yaml override)", reg.Version)
+	}
+}
+
+func TestLoad_LocalYAMLAbsentIsFine(t *testing.T) {
+	// Start from a fixture that includes local.yaml, then remove it to
+	// exercise the os.IsNotExist branch in Load.
+	files := minimalFixtureFiles()
+	files["local.yaml"] = `
+model_classes:
+  default: should-not-appear
+`
 	delete(files, "local.yaml")
 	_, errs, warns, err := loadFixture(t, files)
+	requireNoProblems(t, errs, warns, err)
+	// Verify the value from local.yaml was NOT applied.
+	if got := files["models.yaml"]; strings.Contains(got, "should-not-appear") {
+		t.Error("local.yaml value leaked despite file being absent")
+	}
+}
+
+func TestLoad_ZeroMatchGlobImportWarns(t *testing.T) {
+	// A parent directory that doesn't exist at all (e.g. an optional
+	// bash.d/*.yaml split a registry never opted into) must stay silent
+	// — that's the common case exercised by every other fixture in this
+	// file via minimalFixtureFiles' bash.d/*.yaml import. Only a glob
+	// whose parent directory DOES exist, but whose pattern still matches
+	// nothing (e.g. a typo'd extension), should warn.
+	files := minimalFixtureFiles()
+	// Create the directory via a file with the "wrong" extension, so the
+	// directory genuinely exists but the configured glob still matches
+	// zero files.
+	files["typo.d/profile.yml"] = `profiles:
+  extra:
+    base: allow
+`
+	files["agentcfg.yaml"] = `
+version: 1
+imports:
+  - models.yaml
+  - bash.yaml
+  - typo.d/*.yaml
+  - mcp.yaml
+  - agents.yaml
+  - contexts.yaml
+harnesses:
+  opencode:
+    out: ~/.config/opencode/opencode.json
+  omp:
+    agents_dir: ~/.omp/agent/agents
+    bash_profile: global
+`
+	_, errs, warns, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("unexpected validation errors: %v", errs)
+	}
+	if !anyWarningContains(warns, `import glob "typo.d/*.yaml" matched no files`) {
+		t.Errorf("warns = %v, want a zero-match glob warning", warns)
+	}
+}
+
+func TestLoad_ZeroMatchGlobImportSilentWhenParentDirAbsent(t *testing.T) {
+	// The common case: an optional split-file convention (bash.d/*.yaml)
+	// that a registry never opted into. No directory exists at all, so
+	// no warning should fire — this must stay silent for every fixture
+	// using minimalFixtureFiles' default bash.d/*.yaml import.
+	_, errs, warns, err := loadFixture(t, minimalFixtureFiles())
 	requireNoProblems(t, errs, warns, err)
 }
 
@@ -720,4 +823,274 @@ func anyWarningContains(warns []registry.ValidationWarning, substr string) bool 
 		}
 	}
 	return false
+}
+
+// -- Finding 1: explicit empty default_lists should be tracked as a declaration --
+
+func TestLoad_BashDefaultListsExplicitEmptyIsCollision(t *testing.T) {
+	files := minimalFixtureFiles()
+	// bash.yaml declares default_lists; bash.d/override.yaml explicitly
+	// sets default_lists: [] (empty list, not absent). This should be a
+	// collision because the second file *declared* the field.
+	files["bash.d/override.yaml"] = `
+bash:
+  default_lists: []
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("expected soft validation error, got hard error: %v", err)
+	}
+	if !anyErrorContains(errs, `bash.default_lists declared in both`) {
+		t.Errorf("errs = %v, want a bash.default_lists collision error", errs)
+	}
+}
+
+func TestLoad_BashDefaultListsExplicitEmptyOverrides(t *testing.T) {
+	files := minimalFixtureFiles()
+	// local.yaml explicitly sets default_lists: [] — this should override
+	// the value from bash.yaml (local.yaml replaces whole keys).
+	// Use an agent that doesn't reference a bash profile, since local.yaml's
+	// bash: block replaces the entire Bash struct (wiping profiles).
+	files["agents.yaml"] = `
+agents:
+  - name: lead
+    description: "Primary orchestrator"
+    mode: primary
+    class: default
+    prompt: { text: "You are the lead." }
+    permissions:
+      task: allow
+      edit: deny
+      write: deny
+      skill: deny
+`
+	files["local.yaml"] = `
+bash:
+  default_lists: []
+`
+	reg, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("unexpected validation errors: %v", errs)
+	}
+	if reg.Bash.DefaultLists == nil || len(*reg.Bash.DefaultLists) != 0 {
+		t.Errorf("Bash.DefaultLists = %v, want empty slice after local.yaml override", reg.Bash.DefaultLists)
+	}
+}
+
+// -- Finding 2: prompt.file path traversal must be rejected --
+
+func TestValidate_PromptFileTraversalRejected(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+agents:
+  - name: lead
+    class: default
+    prompt: { file: ../../etc/passwd }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, "prompt file escapes registry root") {
+		t.Errorf("errs = %v, want a path-traversal rejection error", errs)
+	}
+}
+
+func TestValidate_PromptFileAbsolutePathRejected(t *testing.T) {
+	// An absolute prompt.file path must be rejected as a traversal
+	// violation, not silently treated as relative-to-root.
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+agents:
+  - name: lead
+    class: default
+    prompt: { file: "/etc/prompt.md" }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, "prompt file escapes registry root") {
+		t.Errorf("errs = %v, want a path-traversal rejection error for absolute path", errs)
+	}
+}
+
+func TestValidate_PromptFileSymlinkOutsideRootRejected(t *testing.T) {
+	// A symlink inside the registry root that points outside the root
+	// must be rejected as a traversal violation.
+	dir := t.TempDir()
+
+	// Create a target file outside the registry root.
+	externalDir := filepath.Join(dir, "external")
+	if err := os.MkdirAll(externalDir, 0o755); err != nil {
+		t.Fatalf("create external dir: %v", err)
+	}
+	externalPrompt := filepath.Join(externalDir, "prompt.md")
+	if err := os.WriteFile(externalPrompt, []byte("outside root"), 0o644); err != nil {
+		t.Fatalf("write external prompt: %v", err)
+	}
+
+	// Create the registry directory with a symlink pointing outside.
+	regDir := filepath.Join(dir, "registry")
+	if err := os.MkdirAll(regDir, 0o755); err != nil {
+		t.Fatalf("create registry dir: %v", err)
+	}
+
+	// Write agentcfg.yaml with a symlinked prompt path.
+	agentcfgYAML := `
+version: 1
+imports:
+  - models.yaml
+  - bash.yaml
+  - bash.d/*.yaml
+  - mcp.yaml
+  - agents.yaml
+  - contexts.yaml
+harnesses:
+  opencode:
+    out: ~/.config/opencode/opencode.json
+  omp:
+    agents_dir: ~/.omp/agent/agents
+    bash_profile: global
+`
+	if err := os.WriteFile(filepath.Join(regDir, "agentcfg.yaml"), []byte(agentcfgYAML), 0o644); err != nil {
+		t.Fatalf("write agentcfg.yaml: %v", err)
+	}
+
+	// Write minimal supporting files.
+	for name, content := range map[string]string{
+		"models.yaml":   "model_classes:\n  default: anthropic/claude-sonnet-5\n  smol: anthropic/claude-haiku-4-5\n",
+		"bash.yaml":     "bash:\n  default_lists: [guardrails]\n  profiles:\n    global: { base: allow }\n",
+		"mcp.yaml":      "mcp_servers:\n  - name: context7\n    transport: remote\n    url: https://mcp.context7.com/mcp\n",
+		"contexts.yaml": "contexts:\n  - match: { git_remote_owner: test }\n    model_classes:\n      default: anthropic/claude-sonnet-5\n",
+	} {
+		if err := os.WriteFile(filepath.Join(regDir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	// Create the symlink inside the registry pointing outside.
+	promptsDir := filepath.Join(regDir, "prompts")
+	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+		t.Fatalf("create prompts dir: %v", err)
+	}
+	if err := os.Symlink(externalPrompt, filepath.Join(promptsDir, "lead.md")); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	agentsYAML := `
+agents:
+  - name: lead
+    class: default
+    prompt: { file: prompts/lead.md }
+`
+	if err := os.WriteFile(filepath.Join(regDir, "agents.yaml"), []byte(agentsYAML), 0o644); err != nil {
+		t.Fatalf("write agents.yaml: %v", err)
+	}
+
+	_, errs, _, err := registry.Load(regDir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, "prompt file escapes registry root") {
+		t.Errorf("errs = %v, want a path-traversal rejection error for symlink escaping root", errs)
+	}
+}
+
+func TestValidate_PromptFileRelativeInRootStillWorks(t *testing.T) {
+	files := minimalFixtureFiles()
+	// A normal relative path inside the registry should still resolve fine.
+	files["agents.yaml"] = `
+agents:
+  - name: lead
+    class: default
+    prompt: { file: prompts/lead.md }
+`
+	reg, errs, warns, err := loadFixture(t, files)
+	requireNoProblems(t, errs, warns, err)
+	wantPrompt := filepath.Join(reg.RootDir, "prompts/lead.md")
+	if reg.Agents[0].ResolvedPromptFile != wantPrompt {
+		t.Errorf("ResolvedPromptFile = %q, want %q", reg.Agents[0].ResolvedPromptFile, wantPrompt)
+	}
+}
+
+// -- Finding 3: Value shape validation --
+
+func TestValidate_ValueFromCommandRequiresRun(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["mcp.yaml"] = `
+mcp_servers:
+  - name: context7
+    transport: remote
+    url: https://mcp.context7.com/mcp
+    headers:
+      X-Run: { from: command }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `from: command requires a run list`) {
+		t.Errorf("errs = %v, want from:command-requires-run error", errs)
+	}
+}
+
+func TestValidate_ValueFromEnvRequiresName(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["mcp.yaml"] = `
+mcp_servers:
+  - name: context7
+    transport: remote
+    url: https://mcp.context7.com/mcp
+    headers:
+      X-Env: { from: env }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `from: env requires a name`) {
+		t.Errorf("errs = %v, want from:env-requires-name error", errs)
+	}
+}
+
+func TestValidate_ValueFromFileRequiresPath(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["mcp.yaml"] = `
+mcp_servers:
+  - name: context7
+    transport: remote
+    url: https://mcp.context7.com/mcp
+    headers:
+      X-File: { from: file }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `from: file requires a path`) {
+		t.Errorf("errs = %v, want from:file-requires-path error", errs)
+	}
+}
+
+func TestValidate_ValueFromUnknownSourceRejected(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["mcp.yaml"] = `
+mcp_servers:
+  - name: context7
+    transport: remote
+    url: https://mcp.context7.com/mcp
+    headers:
+      X-Bad: { from: magic }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `unknown value source "magic"`) {
+		t.Errorf("errs = %v, want unknown value source error", errs)
+	}
 }

@@ -12,6 +12,8 @@ type mergeState struct {
 	bashProfileSrc  map[string]string
 }
 
+// newMergeState allocates and returns a fresh mergeState with all maps
+// initialized.
 func newMergeState() *mergeState {
 	return &mergeState{
 		sourceOf:       map[string]string{},
@@ -43,9 +45,7 @@ func mergeFileInto(reg *Registry, fc fileContents, path string, isLocal bool, st
 		apply()
 	}
 
-	if fc.Version != nil {
-		reg.Version = *fc.Version
-	}
+	mergeKey("version", fc.Version != nil, func() { reg.Version = *fc.Version })
 	mergeKey("harnesses", fc.Harnesses != nil, func() { reg.Harnesses = fc.Harnesses })
 	mergeKey("model_classes", fc.ModelClasses != nil, func() { reg.ModelClasses = fc.ModelClasses })
 	mergeKey("agents", fc.Agents != nil, func() { reg.Agents = fc.Agents })
@@ -70,7 +70,7 @@ func mergeFileInto(reg *Registry, fc fileContents, path string, isLocal bool, st
 func mergeBash(reg *Registry, src BashPolicy, path string, st *mergeState) []ValidationError {
 	var errs []ValidationError
 
-	if len(src.DefaultLists) > 0 {
+	if src.DefaultLists != nil {
 		if st.bashDefaultsSrc != "" {
 			errs = append(errs, ValidationError{
 				Message: fmt.Sprintf("bash.default_lists declared in both %s and %s", st.bashDefaultsSrc, path),

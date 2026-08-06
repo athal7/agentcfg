@@ -6,6 +6,7 @@
 package scope
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/athal7/agentcfg/internal/contextres"
@@ -19,7 +20,9 @@ import (
 // repo; only the end-to-end wiring test does). Production code always
 // uses the real contextres.Resolve — this var exists purely for this
 // package's own tests, which reassign it and restore it via t.Cleanup.
-var resolveContext = contextres.Resolve
+var resolveContext = func(ctx context.Context, dir string) (*contextres.RemoteInfo, error) {
+	return contextres.Resolve(ctx, dir)
+}
 
 // Project resolves dir's context (if any) against reg.Contexts, merges the
 // matched context's ModelClasses over a copy of the registry's own
@@ -74,7 +77,7 @@ func resolveClasses(reg *registry.Registry, dir string) map[string]string {
 		classes[k] = v
 	}
 
-	remote, err := resolveContext(dir)
+	remote, err := resolveContext(context.Background(), dir)
 	if err != nil || remote == nil {
 		return classes
 	}

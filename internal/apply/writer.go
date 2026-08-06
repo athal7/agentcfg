@@ -60,6 +60,8 @@ func Apply(plan *render.Plan, _ Options) (Result, error) {
 	return result, errors.Join(errs...)
 }
 
+// applyOne dispatches one render.Output to the correct apply function
+// based on its concrete type.
 func applyOne(out render.Output) (applied, skipped string, err error) {
 	switch o := out.(type) {
 	case render.WriteFile:

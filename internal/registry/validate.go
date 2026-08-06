@@ -3,6 +3,7 @@ package registry
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // Validate checks a merged Registry for schema and consistency problems.
@@ -18,10 +19,12 @@ func Validate(reg *Registry) ([]ValidationError, []ValidationWarning) {
 	errs = append(errs, validateBash(reg)...)
 	errs = append(errs, validateMCPServers(reg)...)
 	errs = append(errs, validateContexts(reg)...)
+	errs = append(errs, validateValues(reg)...)
 
 	return errs, warns
 }
 
+// validateModelClasses reports errors for missing reserved model classes.
 func validateModelClasses(reg *Registry) []ValidationError {
 	var errs []ValidationError
 	if len(reg.ModelClasses) == 0 {
@@ -45,8 +48,12 @@ func isValidDecision(d Decision) bool {
 	return d == Allow || d == Deny || d == Ask
 }
 
+// validateAgents reports errors in the registry's agents section.
 func validateAgents(reg *Registry) []ValidationError {
 	var errs []ValidationError
+
+	// Cache the real (symlink-resolved) root path once, outside the loop.
+	rootReal, _ := filepath.EvalSymlinks(reg.RootDir)
 
 	seenNames := map[string]bool{}
 	primaryCount := 0
@@ -92,9 +99,14 @@ func validateAgents(reg *Registry) []ValidationError {
 				Message: fmt.Sprintf("agent %q must set exactly one of prompt.file or prompt.text, not both", a.Name),
 			})
 		case a.Prompt.File != "":
-			if _, err := os.Stat(a.ResolvedPromptFile); err != nil {
+			violates, resolved := promptFileTraversal(reg.RootDir, rootReal, a.Prompt.File)
+			if violates {
 				errs = append(errs, ValidationError{
-					Message: fmt.Sprintf("referenced prompt file does not exist: %s", a.ResolvedPromptFile),
+					Message: fmt.Sprintf("prompt file escapes registry root: %s", a.Prompt.File),
+				})
+			} else if _, err := os.Stat(resolved); err != nil {
+				errs = append(errs, ValidationError{
+					Message: fmt.Sprintf("referenced prompt file does not exist: %s", resolved),
 				})
 			}
 		}
@@ -131,6 +143,7 @@ func validateAgents(reg *Registry) []ValidationError {
 	return errs
 }
 
+// validateAgentWarnings reports non-fatal warnings about the registry's agents.
 func validateAgentWarnings(reg *Registry) []ValidationWarning {
 	var warns []ValidationWarning
 	for _, a := range reg.Agents {
@@ -147,6 +160,7 @@ func validateAgentWarnings(reg *Registry) []ValidationWarning {
 	return warns
 }
 
+// validateBash reports errors in the registry's bash policy lists and profiles.
 func validateBash(reg *Registry) []ValidationError {
 	var errs []ValidationError
 
@@ -171,6 +185,7 @@ func validateBash(reg *Registry) []ValidationError {
 	return errs
 }
 
+// validateMCPServers reports errors in the registry's MCP servers section.
 func validateMCPServers(reg *Registry) []ValidationError {
 	var errs []ValidationError
 
@@ -207,6 +222,7 @@ func validateMCPServers(reg *Registry) []ValidationError {
 	return errs
 }
 
+// validateContexts reports errors in the registry's contexts section.
 func validateContexts(reg *Registry) []ValidationError {
 	var errs []ValidationError
 	for i, c := range reg.Contexts {
@@ -215,6 +231,60 @@ func validateContexts(reg *Registry) []ValidationError {
 				Message: fmt.Sprintf("context entry %d must set at least one of match.git_remote_host or match.git_remote_owner", i),
 			})
 		}
+	}
+	return errs
+}
+
+// validateValues reports errors in value fields across the registry.
+func validateValues(reg *Registry) []ValidationError {
+	var errs []ValidationError
+
+	for _, s := range reg.MCPServers {
+		if !s.URL.IsZero() {
+			errs = append(errs, validateValue(s.URL, fmt.Sprintf("mcp server %q url", s.Name))...)
+		}
+		for i, v := range s.Command {
+			errs = append(errs, validateValue(v, fmt.Sprintf("mcp server %q command[%d]", s.Name, i))...)
+		}
+		for k, v := range s.Headers {
+			errs = append(errs, validateValue(v, fmt.Sprintf("mcp server %q header %q", s.Name, k))...)
+		}
+	}
+
+	return errs
+}
+
+// validateValue reports errors in a single Value's from/field configuration.
+func validateValue(v Value, context string) []ValidationError {
+	var errs []ValidationError
+	if v.IsZero() {
+		return errs
+	}
+	switch v.From {
+	case "":
+		// literal value — always valid
+	case "env":
+		if v.Name == "" {
+			errs = append(errs, ValidationError{
+				Message: fmt.Sprintf("%s: from: env requires a name", context),
+			})
+		}
+	case "file":
+		if v.Path == "" {
+			errs = append(errs, ValidationError{
+				Message: fmt.Sprintf("%s: from: file requires a path", context),
+			})
+		}
+	case "command":
+		if len(v.Run) == 0 {
+			errs = append(errs, ValidationError{
+				Message: fmt.Sprintf("%s: from: command requires a run list", context),
+			})
+		}
+	default:
+		errs = append(errs, ValidationError{
+			Message: fmt.Sprintf("%s: unknown value source %q", context, v.From),
+		})
 	}
 	return errs
 }

@@ -38,6 +38,8 @@ func ResolveRegistryDir(flagValue string) string {
 	}
 }
 
+// expandTilde converts a leading "~" or "~/..." to the current user's home
+// directory, returning the path unchanged when no tilde prefix is present.
 func expandTilde(path string) string {
 	if path != "~" && !strings.HasPrefix(path, "~/") {
 		return path

@@ -96,3 +96,30 @@ func TestValueResolve_DoesNotResolveAtLoadTime(t *testing.T) {
 		t.Fatalf("expected From to be set from unmarshal alone, got %q", v.From)
 	}
 }
+
+func TestValueUnmarshalDoesNotExecuteCommand(t *testing.T) {
+	// Unmarshaling a Value with from: command must NOT execute the command.
+	// Only calling .Resolve() should trigger execution.
+	// Use a command that writes a marker file to prove no side effect
+	// occurred during unmarshal.
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "marker.txt")
+
+	v := unmarshalValue(t, "from: command\nrun: [touch, "+marker+"]\n")
+
+	// Unmarshal alone must not have executed the command — marker must not exist.
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("marker file exists after unmarshal alone — command was executed during unmarshal")
+	}
+
+	// Now call Resolve() — the command should execute and create the marker.
+	_, err := v.Resolve()
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+
+	// After Resolve(), the marker file must exist.
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("marker file not found after Resolve(): %v", err)
+	}
+}

@@ -262,8 +262,8 @@ func TestDetectGaps_NoExternalDirectoryNoGap(t *testing.T) {
 func TestDetectGaps_MCPToolGlobsPerServer(t *testing.T) {
 	reg := &registry.Registry{
 		MCPServers: []registry.MCPServer{
-			{Name: "github", Transport: "remote"},
-			{Name: "linear", Transport: "remote"},
+			{Name: "github", Transport: "remote", Tools: []string{"repo_read", "repo_create"}},
+			{Name: "linear", Transport: "remote", Tools: []string{"issue_search"}},
 		},
 	}
 
@@ -299,7 +299,7 @@ func TestDetectGaps_MCPToolGlobsSuppressedWhenDeclared(t *testing.T) {
 	}
 }
 
-func TestDetectGaps_MCPToolGlobsSkippedWhenServerHasToolsAllowlist(t *testing.T) {
+func TestDetectGaps_MCPToolGlobsGapWhenServerHasToolsAllowlist(t *testing.T) {
 	reg := &registry.Registry{
 		MCPServers: []registry.MCPServer{
 			{Name: "slack", Transport: "remote", Tools: []string{"slack_search", "slack_send_message"}},
@@ -316,10 +316,27 @@ func TestDetectGaps_MCPToolGlobsSkippedWhenServerHasToolsAllowlist(t *testing.T)
 		}
 	}
 	if len(subjects) != 1 {
-		t.Fatalf("got %d mcp_tool_globs gaps, want 1 (only the server without an allowlist): %v", len(subjects), subjects)
+		t.Fatalf("got %d mcp_tool_globs gaps, want 1 (only the server with an allowlist): %v", len(subjects), subjects)
 	}
-	if subjects[0] != "mcp:github" {
-		t.Errorf("got subject %q, want mcp:github", subjects[0])
+	if subjects[0] != "mcp:slack" {
+		t.Errorf("got subject %q, want mcp:slack", subjects[0])
+	}
+}
+
+func TestDetectGaps_MCPToolGlobsNoGapWhenNoServerHasToolsAllowlist(t *testing.T) {
+	reg := &registry.Registry{
+		MCPServers: []registry.MCPServer{
+			{Name: "github", Transport: "remote"},
+			{Name: "linear", Transport: "remote"},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	for _, g := range gaps {
+		if g.Capability == CapMCPToolGlobs {
+			t.Fatalf("did not expect mcp_tool_globs gap when no server has a tools allowlist, got %+v", g)
+		}
 	}
 }
 

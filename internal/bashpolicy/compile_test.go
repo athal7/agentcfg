@@ -8,9 +8,11 @@ import (
 
 func boolPtr(b bool) *bool { return &b }
 
+func stringSlicePtr(s []string) *[]string { return &s }
+
 func TestCompile_PrecedenceExample(t *testing.T) {
 	policy := registry.BashPolicy{
-		DefaultLists: []string{"guardrails", "git"},
+		DefaultLists: stringSlicePtr([]string{"guardrails", "git"}),
 		Lists: map[string]map[string]registry.Decision{
 			"guardrails": {"rm -rf /*": registry.Ask},
 			"git": {
@@ -49,7 +51,7 @@ func TestCompile_PrecedenceExample(t *testing.T) {
 
 func TestCompile_ProfileListOverridesDefaultListForSamePattern(t *testing.T) {
 	policy := registry.BashPolicy{
-		DefaultLists: []string{"git"},
+		DefaultLists: stringSlicePtr([]string{"git"}),
 		Lists: map[string]map[string]registry.Decision{
 			"git":      {"git commit*": registry.Ask},
 			"override": {"git commit*": registry.Allow},
@@ -71,7 +73,7 @@ func TestCompile_ProfileListOverridesDefaultListForSamePattern(t *testing.T) {
 
 func TestCompile_DefaultListsFalseSuppressesDefaultChain(t *testing.T) {
 	policy := registry.BashPolicy{
-		DefaultLists: []string{"guardrails", "git"},
+		DefaultLists: stringSlicePtr([]string{"guardrails", "git"}),
 		Lists: map[string]map[string]registry.Decision{
 			"guardrails": {"rm -rf /*": registry.Ask},
 			"git":        {"git commit*": registry.Ask},

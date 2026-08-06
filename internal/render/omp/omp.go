@@ -16,6 +16,7 @@ import (
 	"github.com/athal7/agentcfg/internal/render"
 )
 
+// id is the renderer identifier used by ID() and capability checks.
 const id = "omp"
 
 // Paths are left unexpanded (literal "~"): tilde-expansion is the apply
@@ -28,12 +29,17 @@ const (
 	targetName        = "omp"
 )
 
+// New returns a Renderer that produces omp's native ~/.omp/agent config.
 func New() render.Renderer { return renderer{} }
 
+// renderer implements render.Renderer for the omp harness.
 type renderer struct{}
 
+// ID returns the renderer's identifier, "omp".
 func (renderer) ID() string { return id }
 
+// Capabilities returns the set of registry features this renderer can
+// express in omp's native config.
 func (renderer) Capabilities() []render.Capability {
 	return []render.Capability{
 		render.CapAgentDefinitions,
@@ -47,6 +53,9 @@ func (renderer) Capabilities() []render.Capability {
 	}
 }
 
+// Render produces a Plan that writes omp's native ~/.omp/agent config: per-agent
+// markdown files, a system prompt append, a global bash policy sync command,
+// and an MCP server config file.
 func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Plan, error) {
 	plan := &render.Plan{}
 	plan.Gaps = append(plan.Gaps, render.DetectGaps(reg, r.Capabilities())...)
@@ -244,6 +253,8 @@ func renderBashPatternsCommand(reg *registry.Registry) (render.RunCommand, error
 	}, nil
 }
 
+// translateDecision maps a bashpolicy.Decision to omp's native decision
+// name — "ask" becomes "prompt" in omp's vocabulary.
 func translateDecision(d bashpolicy.Decision) string {
 	if d == bashpolicy.Ask {
 		return "prompt"
@@ -260,7 +271,7 @@ func renderMCPServer(s registry.MCPServer) (map[string]any, bool, *render.Gap) {
 	case "remote":
 		url, err := s.URL.Resolve()
 		if err != nil {
-			return nil, false, resolveFailureGap(s.Name, "url", err)
+			return nil, false, resolveFailureGap(s, "url", err)
 		}
 		entry["url"] = url
 	case "local":
@@ -268,25 +279,31 @@ func renderMCPServer(s registry.MCPServer) (map[string]any, bool, *render.Gap) {
 		for _, part := range s.Command {
 			resolved, err := part.Resolve()
 			if err != nil {
-				return nil, false, resolveFailureGap(s.Name, "command", err)
+				return nil, false, resolveFailureGap(s, "command", err)
 			}
 			cmd = append(cmd, resolved)
 		}
 		entry["command"] = cmd
 	default:
-		return nil, false, resolveFailureGap(s.Name, "transport", fmt.Errorf("unknown transport %q", s.Transport))
+		return nil, false, resolveFailureGap(s, "transport", fmt.Errorf("unknown transport %q", s.Transport))
 	}
 	return entry, true, nil
 }
 
-func resolveFailureGap(server, field string, err error) *render.Gap {
+// resolveFailureGap builds a GapSkip for an MCP server whose URL, command,
+// or transport could not be resolved at render time.
+func resolveFailureGap(s registry.MCPServer, field string, err error) *render.Gap {
+	cap := render.CapMCPLocalTransport
+	if s.Transport == "remote" {
+		cap = render.CapMCPRemoteTransport
+	}
 	return &render.Gap{
 		Kind:       render.GapSkip,
-		Capability: render.CapMCPLocalTransport,
-		Subject:    "mcp:" + server,
+		Capability: cap,
+		Subject:    "mcp:" + s.Name,
 		Detail: fmt.Sprintf(
 			"mcp server %q %s could not be resolved (%s); it was omitted from this harness's config.",
-			server, field, err,
+			s.Name, field, err,
 		),
 	}
 }

@@ -5,9 +5,11 @@
 package contextres
 
 import (
+	"context"
 	"net/url"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // RemoteInfo is a resolved git remote's host and owner (e.g. "github.com",
@@ -28,12 +30,17 @@ type RemoteInfo struct {
 // (git exiting non-zero for "not a repo" or "no origin" is expected
 // control flow, not a Go error), but the signature carries error for
 // whatever future failure mode might need to surface as one.
-func Resolve(dir string) (*RemoteInfo, error) {
-	if err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Run(); err != nil {
+func Resolve(ctx context.Context, dir string) (*RemoteInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--show-toplevel")
+	if err := cmd.Run(); err != nil {
 		return nil, nil
 	}
 
-	out, err := exec.Command("git", "-C", dir, "remote", "get-url", "origin").Output()
+	cmd = exec.CommandContext(ctx, "git", "-C", dir, "remote", "get-url", "origin")
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, nil
 	}
@@ -84,6 +91,7 @@ func parseSCPLike(raw string) *RemoteInfo {
 	return &RemoteInfo{Host: host, Owner: owner}
 }
 
+// stripUserinfo strips a userinfo prefix (user@ or user:pass@) from a URL host component.
 func stripUserinfo(hostPart string) string {
 	if idx := strings.Index(hostPart, "@"); idx != -1 {
 		return hostPart[idx+1:]

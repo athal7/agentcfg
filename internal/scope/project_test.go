@@ -1,6 +1,7 @@
 package scope
 
 import (
+	"context"
 	"errors"
 	"os/exec"
 	"reflect"
@@ -14,7 +15,7 @@ import (
 // withResolveContext substitutes the package-level resolveContext seam for
 // the duration of a test, restoring the original afterward. Tests that
 // don't need a real git repo use this instead of shelling out to git.
-func withResolveContext(t *testing.T, fn func(dir string) (*contextres.RemoteInfo, error)) {
+func withResolveContext(t *testing.T, fn func(ctx context.Context, dir string) (*contextres.RemoteInfo, error)) {
 	t.Helper()
 	orig := resolveContext
 	resolveContext = fn
@@ -61,7 +62,7 @@ func (f fakeProjectRenderer) RenderProject(classes map[string]string, _ *registr
 }
 
 func TestProject_ContextMatchOverridesSomeClasses(t *testing.T) {
-	withResolveContext(t, func(dir string) (*contextres.RemoteInfo, error) {
+	withResolveContext(t, func(ctx context.Context, dir string) (*contextres.RemoteInfo, error) {
 		return &contextres.RemoteInfo{Host: "github.com", Owner: "athal7"}, nil
 	})
 
@@ -100,7 +101,7 @@ func TestProject_ContextMatchOverridesSomeClasses(t *testing.T) {
 }
 
 func TestProject_NoContextMatchUsesRegistryDefaults(t *testing.T) {
-	withResolveContext(t, func(dir string) (*contextres.RemoteInfo, error) {
+	withResolveContext(t, func(ctx context.Context, dir string) (*contextres.RemoteInfo, error) {
 		return &contextres.RemoteInfo{Host: "github.com", Owner: "someone-else"}, nil
 	})
 
@@ -134,7 +135,7 @@ func TestProject_NoContextMatchUsesRegistryDefaults(t *testing.T) {
 }
 
 func TestProject_NoGitRemoteAtAllUsesRegistryDefaults(t *testing.T) {
-	withResolveContext(t, func(dir string) (*contextres.RemoteInfo, error) {
+	withResolveContext(t, func(ctx context.Context, dir string) (*contextres.RemoteInfo, error) {
 		return nil, nil // contextres.Resolve's "not a repo / no origin" outcome
 	})
 
@@ -161,7 +162,7 @@ func TestProject_NoGitRemoteAtAllUsesRegistryDefaults(t *testing.T) {
 }
 
 func TestProject_FirstMatchingContextWins(t *testing.T) {
-	withResolveContext(t, func(dir string) (*contextres.RemoteInfo, error) {
+	withResolveContext(t, func(ctx context.Context, dir string) (*contextres.RemoteInfo, error) {
 		return &contextres.RemoteInfo{Host: "github.com", Owner: "athal7"}, nil
 	})
 
@@ -193,7 +194,7 @@ func TestProject_FirstMatchingContextWins(t *testing.T) {
 }
 
 func TestProject_RendererWithoutProjectScopeProducesSkipGap(t *testing.T) {
-	withResolveContext(t, func(dir string) (*contextres.RemoteInfo, error) {
+	withResolveContext(t, func(ctx context.Context, dir string) (*contextres.RemoteInfo, error) {
 		return nil, nil
 	})
 
@@ -229,7 +230,7 @@ func TestProject_RendererWithoutProjectScopeProducesSkipGap(t *testing.T) {
 }
 
 func TestProject_MixedRenderersAggregateInOrder(t *testing.T) {
-	withResolveContext(t, func(dir string) (*contextres.RemoteInfo, error) {
+	withResolveContext(t, func(ctx context.Context, dir string) (*contextres.RemoteInfo, error) {
 		return nil, nil
 	})
 
@@ -257,7 +258,7 @@ func TestProject_MixedRenderersAggregateInOrder(t *testing.T) {
 }
 
 func TestProject_RenderProjectErrorPropagates(t *testing.T) {
-	withResolveContext(t, func(dir string) (*contextres.RemoteInfo, error) {
+	withResolveContext(t, func(ctx context.Context, dir string) (*contextres.RemoteInfo, error) {
 		return nil, nil
 	})
 

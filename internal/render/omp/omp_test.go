@@ -14,12 +14,14 @@ func baseBashPolicy() registry.BashPolicy {
 		Lists: map[string]map[string]registry.Decision{
 			"safe": {"ls*": registry.Allow},
 		},
-		DefaultLists: []string{"safe"},
+		DefaultLists: sp([]string{"safe"}),
 		Profiles: map[string]registry.BashProfile{
 			"global": {Base: registry.Ask},
 		},
 	}
 }
+
+func sp(s []string) *[]string { return &s }
 
 func fixtureReadFile(files map[string]string) func(string) ([]byte, error) {
 	return func(path string) ([]byte, error) {
@@ -181,7 +183,7 @@ func TestRender_GapsForUndeclaredCapabilities(t *testing.T) {
 			},
 		},
 		MCPServers: []registry.MCPServer{
-			{Name: "github", Transport: "local", Command: []registry.Value{{Literal: "gh-mcp"}}},
+			{Name: "github", Transport: "local", Command: []registry.Value{{Literal: "gh-mcp"}}, Tools: []string{"repo_read"}},
 		},
 	}
 	reg.Bash.Profiles["readonly"] = registry.BashProfile{Base: registry.Deny}

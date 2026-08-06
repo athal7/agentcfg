@@ -47,6 +47,9 @@ Each entry is a path relative to the registry root. An entry containing `*`
 is expanded as a glob (`filepath.Glob`) and the matches are sorted
 alphabetically before merging — this is what makes a `bash.d/*.yaml` split
 deterministic. A non-glob entry that doesn't exist is a hard load error.
+Imports are **non-recursive**: a file reached via `imports:` is merged into
+the registry, but any `imports:` it declares is ignored — only the
+top-level `agentcfg.yaml`'s `imports:` list is honored.
 
 ### Merge rules
 
@@ -77,9 +80,8 @@ without touching the shared files.
 
 ### `version`
 
-Plain `int`. Only the last file to set it wins (no merge conflict check on
-`version` itself, unlike every other key) since it's assigned directly
-rather than routed through the mergeKey/conflict-checking path.
+Plain `int`. Must appear in exactly one non-local file (same collision rule
+as every other top-level key). `local.yaml` may override it unconditionally.
 
 ## `harnesses:`
 

@@ -22,6 +22,8 @@ type renderOptions struct {
 	strict     bool
 }
 
+// registerRenderFlags attaches the shared --registry, --target, --scope,
+// --context, --explain, --json, and --strict flags to cmd.
 func registerRenderFlags(cmd *cobra.Command, opts *renderOptions) {
 	cmd.Flags().StringVar(&opts.registry, "registry", "", "registry directory (default resolution: env/XDG/~/.config)")
 	cmd.Flags().StringVar(&opts.target, "target", "", "comma-separated renderer IDs (default: all registered renderers)")
@@ -32,6 +34,8 @@ func registerRenderFlags(cmd *cobra.Command, opts *renderOptions) {
 	cmd.Flags().BoolVar(&opts.strict, "strict", false, "exit non-zero if any gap is present across all rendered plans")
 }
 
+// newRenderCmd creates the `render` subcommand that previews native harness
+// configuration without writing anything.
 func newRenderCmd() *cobra.Command {
 	var opts renderOptions
 

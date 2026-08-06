@@ -28,6 +28,8 @@ func DetectGaps(reg *registry.Registry, declared []Capability) []Gap {
 	return gaps
 }
 
+// detectAgentStepsGaps reports a GapSkip for every agent that sets steps:
+// when the renderer doesn't declare CapAgentSteps.
 func detectAgentStepsGaps(reg *registry.Registry, has map[Capability]bool) []Gap {
 	if has[CapAgentSteps] {
 		return nil
@@ -57,6 +59,9 @@ func isPerAgentBashProfile(b registry.BashPermission) bool {
 	return b.Profile != "" && b.Profile != "global"
 }
 
+// detectPerAgentBashPolicyGap reports a GapSkip when the renderer doesn't
+// declare CapPerAgentBashPolicy and one or more agents name a per-agent
+// bash profile other than "global".
 func detectPerAgentBashPolicyGap(reg *registry.Registry, has map[Capability]bool) []Gap {
 	if has[CapPerAgentBashPolicy] {
 		return nil
@@ -78,6 +83,9 @@ func detectPerAgentBashPolicyGap(reg *registry.Registry, has map[Capability]bool
 	}}
 }
 
+// detectPrimaryAgentGap reports a GapReduction when the renderer doesn't
+// declare CapPrimaryAgent (or CapPromptAppend as a substitute) and the
+// registry has a mode:primary agent.
 func detectPrimaryAgentGap(reg *registry.Registry, has map[Capability]bool) []Gap {
 	// CapPromptAppend is the documented substitute mechanism for
 	// CapPrimaryAgent: a harness that appends the primary agent's prompt
@@ -99,6 +107,9 @@ func detectPrimaryAgentGap(reg *registry.Registry, has map[Capability]bool) []Ga
 	return nil
 }
 
+// detectExternalDirectoryGaps reports a GapSkip for every agent that sets
+// permissions.external_directory when the renderer doesn't declare
+// CapExternalDirectory.
 func detectExternalDirectoryGaps(reg *registry.Registry, has map[Capability]bool) []Gap {
 	if has[CapExternalDirectory] {
 		return nil
@@ -121,6 +132,8 @@ func detectExternalDirectoryGaps(reg *registry.Registry, has map[Capability]bool
 	return gaps
 }
 
+// detectMCPToolGlobsGaps reports a GapSkip for every MCP server that sets
+// tools: when the renderer doesn't declare CapMCPToolGlobs.
 func detectMCPToolGlobsGaps(reg *registry.Registry, has map[Capability]bool) []Gap {
 	if has[CapMCPToolGlobs] {
 		return nil

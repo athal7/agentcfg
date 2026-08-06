@@ -15,6 +15,8 @@ func MatchGlob(pattern, s string) bool {
 	return matchGlobFrom([]rune(pattern), 0, []rune(s), 0)
 }
 
+// matchGlobFrom is the recursive core of MatchGlob, starting at pattern
+// index pi and string index si.
 func matchGlobFrom(p []rune, pi int, s []rune, si int) bool {
 	for pi < len(p) {
 		switch {
@@ -82,6 +84,8 @@ func matchGlobFrom(p []rune, pi int, s []rune, si int) bool {
 	return si == len(s)
 }
 
+// charInClass reports whether c is contained in the character class
+// described by class (a slice of runes from inside [...]).
 func charInClass(c rune, class []rune) bool {
 	for i := 0; i < len(class); i++ {
 		if i+2 < len(class) && class[i+1] == '-' {

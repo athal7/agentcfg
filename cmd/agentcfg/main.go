@@ -7,6 +7,7 @@ package main
 
 import "github.com/athal7/agentcfg/internal/cli"
 
+// main is the CLI entrypoint; it builds and executes the root command.
 func main() {
 	cli.Execute()
 }

@@ -18,6 +18,7 @@ import (
 // Decision is a bash command policy outcome.
 type Decision string
 
+// Bash policy decision outcomes.
 const (
 	Allow Decision = "allow"
 	Deny  Decision = "deny"
@@ -266,6 +267,7 @@ type ValidationError struct {
 	Message string
 }
 
+// Error implements the error interface for ValidationError.
 func (e ValidationError) Error() string { return e.Message }
 
 // ValidationWarning is a non-fatal advisory finding (e.g. an MCP-proxy

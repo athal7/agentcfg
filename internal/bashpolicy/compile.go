@@ -14,6 +14,7 @@ import (
 // Decision is a bash command policy outcome.
 type Decision string
 
+// Bash policy decision outcomes.
 const (
 	Allow Decision = "allow"
 	Deny  Decision = "deny"

@@ -12,6 +12,7 @@ import (
 	"github.com/athal7/agentcfg/internal/renderers"
 )
 
+// newExplainCmd builds the explain parent command.
 func newExplainCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "explain",
@@ -21,6 +22,7 @@ func newExplainCmd() *cobra.Command {
 	return cmd
 }
 
+// newExplainBashCmd builds the explain bash subcommand that compares bash policy decisions across targets.
 func newExplainBashCmd() *cobra.Command {
 	var registryFlag, command, targetFlag string
 
@@ -191,6 +193,7 @@ func displayDecision(targetID string, d bashpolicy.Decision) string {
 	return string(d)
 }
 
+// hasCapability reports whether renderer r declares capability want.
 func hasCapability(r render.Renderer, want render.Capability) bool {
 	for _, c := range r.Capabilities() {
 		if c == want {

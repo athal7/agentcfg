@@ -13,18 +13,25 @@ import (
 	"github.com/athal7/agentcfg/internal/render"
 )
 
+// applyMergeJSON merges m.Object into the JSON file at m.Path, touching
+// only the dotted paths listed in m.Managed.
 func applyMergeJSON(m render.MergeJSON) (applied, skipped string, err error) {
 	return applyMerge(m.Path, m.Mode, m.Managed, m.Object, json.Unmarshal, marshalIndentJSON)
 }
 
+// applyMergeYAML merges m.Object into the YAML file at m.Path, touching
+// only the dotted paths listed in m.Managed.
 func applyMergeYAML(m render.MergeYAML) (applied, skipped string, err error) {
 	return applyMerge(m.Path, m.Mode, m.Managed, m.Object, yaml.Unmarshal, yaml.Marshal)
 }
 
+// applyMergeTOML merges m.Object into the TOML file at m.Path, touching
+// only the dotted paths listed in m.Managed.
 func applyMergeTOML(m render.MergeTOML) (applied, skipped string, err error) {
 	return applyMerge(m.Path, m.Mode, m.Managed, m.Object, toml.Unmarshal, toml.Marshal)
 }
 
+// marshalIndentJSON encodes v as indented JSON (2-space indent).
 func marshalIndentJSON(v any) ([]byte, error) {
 	return json.MarshalIndent(v, "", "  ")
 }

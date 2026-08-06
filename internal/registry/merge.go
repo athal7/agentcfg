@@ -12,6 +12,8 @@ type mergeState struct {
 	bashProfileSrc  map[string]string
 }
 
+// newMergeState allocates and returns a fresh mergeState with all maps
+// initialized.
 func newMergeState() *mergeState {
 	return &mergeState{
 		sourceOf:       map[string]string{},

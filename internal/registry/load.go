@@ -93,6 +93,8 @@ func Load(registryDir string) (*Registry, []ValidationError, []ValidationWarning
 	return reg, verrs, vWarns, nil
 }
 
+// parseFile reads path from disk and decodes it as YAML into a fileContents
+// struct.
 func parseFile(path string) (fileContents, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

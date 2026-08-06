@@ -91,6 +91,7 @@ func parseSCPLike(raw string) *RemoteInfo {
 	return &RemoteInfo{Host: host, Owner: owner}
 }
 
+// stripUserinfo strips a userinfo prefix (user@ or user:pass@) from a URL host component.
 func stripUserinfo(hostPart string) string {
 	if idx := strings.Index(hostPart, "@"); idx != -1 {
 		return hostPart[idx+1:]

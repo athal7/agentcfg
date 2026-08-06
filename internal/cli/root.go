@@ -18,6 +18,7 @@ func Execute() {
 	}
 }
 
+// newRootCmd builds the root agentcfg cobra command and registers all subcommands.
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "agentcfg",

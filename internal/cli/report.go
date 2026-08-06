@@ -81,6 +81,9 @@ type jsonOutput struct {
 	Describe string `json:"describe"`
 }
 
+// toJSONOutput converts a render.Output into its --json representation,
+// mapping the concrete type to a stable JSON "type" field and extracting
+// the path where applicable.
 func toJSONOutput(o render.Output) jsonOutput {
 	jo := jsonOutput{Type: outputTypeName(o), Describe: o.Describe()}
 	switch v := o.(type) {
@@ -106,6 +109,7 @@ type jsonGap struct {
 	Detail     string `json:"detail"`
 }
 
+// toJSONGap converts a render.Gap into its --json representation.
 func toJSONGap(g render.Gap) jsonGap {
 	return jsonGap{
 		Kind:       string(g.Kind),
@@ -128,10 +132,12 @@ type jsonPlanTarget struct {
 	Gaps    []jsonGap    `json:"gaps"`
 }
 
+// jsonPlanReport is the top-level JSON shape for render's --json output.
 type jsonPlanReport struct {
 	Targets []jsonPlanTarget `json:"targets"`
 }
 
+// printPlanJSON encodes plans as the jsonPlanReport JSON shape to w.
 func printPlanJSON(w io.Writer, plans []targetPlan) error {
 	report := jsonPlanReport{Targets: []jsonPlanTarget{}}
 	for _, p := range plans {
@@ -160,6 +166,7 @@ type applyOutcome struct {
 	Gaps    []render.Gap
 }
 
+// applyOutcomeFrom builds an applyOutcome from a targetPlan and its apply.Result.
 func applyOutcomeFrom(p targetPlan, result apply.Result) applyOutcome {
 	return applyOutcome{
 		Scope:   p.Scope,
@@ -170,6 +177,7 @@ func applyOutcomeFrom(p targetPlan, result apply.Result) applyOutcome {
 	}
 }
 
+// printApplySummary writes a one-line-per-target summary (applied/skipped/gap counts) to w.
 func printApplySummary(w io.Writer, outcomes []applyOutcome) {
 	if len(outcomes) == 0 {
 		fmt.Fprintln(w, "no targets selected")
@@ -180,6 +188,7 @@ func printApplySummary(w io.Writer, outcomes []applyOutcome) {
 	}
 }
 
+// printApplyExplain writes a detailed per-target breakdown (each applied/skipped output, each gap) to w.
 func printApplyExplain(w io.Writer, outcomes []applyOutcome) {
 	if len(outcomes) == 0 {
 		fmt.Fprintln(w, "no targets selected")
@@ -200,6 +209,7 @@ func printApplyExplain(w io.Writer, outcomes []applyOutcome) {
 	}
 }
 
+// jsonApplyTarget is the JSON shape for one target's apply outcome.
 type jsonApplyTarget struct {
 	Target  string    `json:"target"`
 	Scope   string    `json:"scope"`
@@ -208,10 +218,12 @@ type jsonApplyTarget struct {
 	Gaps    []jsonGap `json:"gaps"`
 }
 
+// jsonApplyReport is the top-level JSON shape for apply's --json output.
 type jsonApplyReport struct {
 	Targets []jsonApplyTarget `json:"targets"`
 }
 
+// printApplyJSON encodes outcomes as the jsonApplyReport JSON shape to w.
 func printApplyJSON(w io.Writer, outcomes []applyOutcome) error {
 	report := jsonApplyReport{Targets: []jsonApplyTarget{}}
 	for _, o := range outcomes {

@@ -24,6 +24,7 @@ func Validate(reg *Registry) ([]ValidationError, []ValidationWarning) {
 	return errs, warns
 }
 
+// validateModelClasses reports errors for missing reserved model classes.
 func validateModelClasses(reg *Registry) []ValidationError {
 	var errs []ValidationError
 	if len(reg.ModelClasses) == 0 {
@@ -47,6 +48,7 @@ func isValidDecision(d Decision) bool {
 	return d == Allow || d == Deny || d == Ask
 }
 
+// validateAgents reports errors in the registry's agents section.
 func validateAgents(reg *Registry) []ValidationError {
 	var errs []ValidationError
 
@@ -139,6 +141,7 @@ func validateAgents(reg *Registry) []ValidationError {
 	return errs
 }
 
+// validateAgentWarnings reports non-fatal warnings about the registry's agents.
 func validateAgentWarnings(reg *Registry) []ValidationWarning {
 	var warns []ValidationWarning
 	for _, a := range reg.Agents {
@@ -155,6 +158,7 @@ func validateAgentWarnings(reg *Registry) []ValidationWarning {
 	return warns
 }
 
+// validateBash reports errors in the registry's bash policy lists and profiles.
 func validateBash(reg *Registry) []ValidationError {
 	var errs []ValidationError
 
@@ -179,6 +183,7 @@ func validateBash(reg *Registry) []ValidationError {
 	return errs
 }
 
+// validateMCPServers reports errors in the registry's MCP servers section.
 func validateMCPServers(reg *Registry) []ValidationError {
 	var errs []ValidationError
 
@@ -215,6 +220,7 @@ func validateMCPServers(reg *Registry) []ValidationError {
 	return errs
 }
 
+// validateContexts reports errors in the registry's contexts section.
 func validateContexts(reg *Registry) []ValidationError {
 	var errs []ValidationError
 	for i, c := range reg.Contexts {
@@ -227,6 +233,7 @@ func validateContexts(reg *Registry) []ValidationError {
 	return errs
 }
 
+// validateValues reports errors in value fields across the registry.
 func validateValues(reg *Registry) []ValidationError {
 	var errs []ValidationError
 
@@ -245,6 +252,7 @@ func validateValues(reg *Registry) []ValidationError {
 	return errs
 }
 
+// validateValue reports errors in a single Value's from/field configuration.
 func validateValue(v Value, context string) []ValidationError {
 	var errs []ValidationError
 	if v.IsZero() {

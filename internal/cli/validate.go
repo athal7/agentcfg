@@ -9,6 +9,8 @@ import (
 	"github.com/athal7/agentcfg/internal/registry"
 )
 
+// newValidateCmd creates the `validate` subcommand that loads a registry
+// and reports every schema and consistency error and warning.
 func newValidateCmd() *cobra.Command {
 	var registryFlag string
 

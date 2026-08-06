@@ -42,6 +42,7 @@ var allCapabilities = []render.Capability{
 	render.CapProjectModelPolicy,
 }
 
+// newDoctorCmd builds the doctor command.
 func newDoctorCmd() *cobra.Command {
 	var registryFlag string
 	var markdown bool
@@ -85,6 +86,7 @@ func runDoctor(out io.Writer, registryFlag string, markdown bool) {
 	printRegistryGaps(out, targets, reg)
 }
 
+// printCapabilityMatrix writes a table of which capabilities each target renderer supports.
 func printCapabilityMatrix(w io.Writer, targets []render.Renderer, caps []render.Capability, markdown bool) {
 	declared := make([]map[render.Capability]bool, len(targets))
 	for i, r := range targets {
@@ -139,6 +141,7 @@ func printCapabilityMatrix(w io.Writer, targets []render.Renderer, caps []render
 	tw.Flush()
 }
 
+// printRegistryGaps writes each target's rendering gaps against the given registry.
 func printRegistryGaps(w io.Writer, targets []render.Renderer, reg *registry.Registry) {
 	for _, r := range targets {
 		gaps := render.DetectGaps(reg, r.Capabilities())

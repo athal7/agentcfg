@@ -13,14 +13,20 @@ import (
 	"github.com/athal7/agentcfg/internal/apply"
 )
 
+// defaultBestEffortTimeout is the timeout used when --best-effort is enabled
+// but no explicit --timeout flag is provided.
 const defaultBestEffortTimeout = 5 * time.Second
 
+// applyOptions extends renderOptions with --best-effort and --timeout flags
+// specific to the apply command.
 type applyOptions struct {
 	renderOptions
 	bestEffort bool
 	timeout    time.Duration
 }
 
+// newApplyCmd creates the `apply` subcommand that renders and writes native
+// harness configuration, with --best-effort and --strict modifiers.
 func newApplyCmd() *cobra.Command {
 	var opts applyOptions
 

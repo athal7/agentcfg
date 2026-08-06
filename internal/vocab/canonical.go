@@ -7,6 +7,7 @@ package vocab
 // Canonical is a harness-agnostic tool or permission name.
 type Canonical string
 
+// Canonical tool and permission names used across all renderers.
 const (
 	Read              Canonical = "read"
 	Write             Canonical = "write"

@@ -41,6 +41,34 @@ func TestMatchGlob(t *testing.T) {
 		{"*", "", true},
 		{"exact", "exact", true},
 		{"exact", "exactly", false},
+		// Escaped literal characters (not just \*)
+		{`echo \?question`, "echo ?question", true},
+		{`echo \?question`, "echo anything", false},
+		{`echo \[bracket`, "echo [bracket", true},
+		{`echo \[bracket`, "echo anything", false},
+		{`echo \[`, "echo [", true},
+		{`echo \[`, "echo anything", false},
+		// Bracket negation with !
+		{"[!abc]", "d", true},
+		{"[!abc]", "a", false},
+		{"[!abc]", "b", false},
+		{"[!abc]", "c", false},
+		// Bracket negation with ^
+		{"[^abc]", "d", true},
+		{"[^abc]", "a", false},
+		// Bracket range
+		{"[a-z]", "m", true},
+		{"[a-z]", "a", true},
+		{"[a-z]", "z", true},
+		{"[a-z]", "A", false},
+		{"[a-z]", "1", false},
+		// Bracket range negation
+		{"[!0-9]", "a", true},
+		{"[!0-9]", "5", false},
+		// Unterminated bracket treated as literal [
+		{"[abc", "[abc", true},
+		{"[abc", "[", false},
+		{"[abc", "x", false},
 	}
 	for _, tt := range tests {
 		got := matchGlob(tt.pattern, tt.s)

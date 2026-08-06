@@ -47,6 +47,9 @@ Each entry is a path relative to the registry root. An entry containing `*`
 is expanded as a glob (`filepath.Glob`) and the matches are sorted
 alphabetically before merging — this is what makes a `bash.d/*.yaml` split
 deterministic. A non-glob entry that doesn't exist is a hard load error.
+Imports are **non-recursive**: a file reached via `imports:` is merged into
+the registry, but any `imports:` it declares is ignored — only the
+top-level `agentcfg.yaml`'s `imports:` list is honored.
 
 ### Merge rules
 

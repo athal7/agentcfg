@@ -127,3 +127,78 @@ func TestOrder_RealisticPatternSet(t *testing.T) {
 		}
 	}
 }
+
+func TestScore_EscapedCharsAreLiteralNotWildcard(t *testing.T) {
+	tests := []struct {
+		pattern string
+		want    SortKey
+	}{
+		{
+			pattern: `\?literal`,
+			want:    SortKey{HasWildcard: false, LiteralCount: 8, WildcardCount: 0, StartsWithWildcard: false, Length: 9, Pattern: `\?literal`},
+		},
+		{
+			pattern: `\[literal`,
+			want:    SortKey{HasWildcard: false, LiteralCount: 8, WildcardCount: 0, StartsWithWildcard: false, Length: 9, Pattern: `\[literal`},
+		},
+		{
+			pattern: `\*foo`,
+			want:    SortKey{HasWildcard: false, LiteralCount: 4, WildcardCount: 0, StartsWithWildcard: false, Length: 5, Pattern: `\*foo`},
+		},
+	}
+	for _, tt := range tests {
+		got := Score(tt.pattern)
+		if got != tt.want {
+			t.Errorf("Score(%q) = %+v, want %+v", tt.pattern, got, tt.want)
+		}
+	}
+}
+
+func TestScore_BracketNegationAndRange(t *testing.T) {
+	tests := []struct {
+		pattern string
+		want    SortKey
+	}{
+		{
+			pattern: "[!abc]",
+			want:    SortKey{HasWildcard: true, LiteralCount: 0, WildcardCount: 1, StartsWithWildcard: true, Length: 6, Pattern: "[!abc]"},
+		},
+		{
+			pattern: "[^abc]",
+			want:    SortKey{HasWildcard: true, LiteralCount: 0, WildcardCount: 1, StartsWithWildcard: true, Length: 6, Pattern: "[^abc]"},
+		},
+		{
+			pattern: "[a-z]",
+			want:    SortKey{HasWildcard: true, LiteralCount: 0, WildcardCount: 1, StartsWithWildcard: true, Length: 5, Pattern: "[a-z]"},
+		},
+		{
+			pattern: "[!0-9]",
+			want:    SortKey{HasWildcard: true, LiteralCount: 0, WildcardCount: 1, StartsWithWildcard: true, Length: 6, Pattern: "[!0-9]"},
+		},
+		{
+			pattern: "rm -rf [!0-9]*",
+			want:    SortKey{HasWildcard: true, LiteralCount: 7, WildcardCount: 2, StartsWithWildcard: false, Length: 14, Pattern: "rm -rf [!0-9]*"},
+		},
+	}
+	for _, tt := range tests {
+		got := Score(tt.pattern)
+		if got != tt.want {
+			t.Errorf("Score(%q) = %+v, want %+v", tt.pattern, got, tt.want)
+		}
+	}
+}
+
+func TestScore_UnterminatedBracketIsLiteral(t *testing.T) {
+	// Unterminated bracket: Score treats '[' as a literal character.
+	got := Score("[abc")
+	if got.HasWildcard {
+		t.Errorf("HasWildcard = true, want false (unterminated bracket treated as literal '[')")
+	}
+	if got.WildcardCount != 0 {
+		t.Errorf("WildcardCount = %d, want 0", got.WildcardCount)
+	}
+	// "[abc" is 5 runes but Score counts '[' as 1 literal + 'abc' as 3 = 4.
+	if got.LiteralCount != 4 {
+		t.Errorf("LiteralCount = %d, want 4", got.LiteralCount)
+	}
+}

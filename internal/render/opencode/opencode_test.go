@@ -3,7 +3,6 @@ package opencode
 import (
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 
@@ -107,7 +106,6 @@ func TestRender_LeadAndBuildWithOneMCPServer(t *testing.T) {
 			gotPermissionLeaves = append(gotPermissionLeaves, m)
 		}
 	}
-	sort.Strings(gotPermissionLeaves)
 	if !reflect.DeepEqual(gotPermissionLeaves, wantPermissionLeaves) {
 		t.Errorf("permission managed leaves = %v, want %v", gotPermissionLeaves, wantPermissionLeaves)
 	}

@@ -64,8 +64,13 @@ func TestAllCapabilities_MatchesRendererGoConstCount(t *testing.T) {
 	}
 
 	got := make(map[string]bool, len(allCapabilities))
+	var duplicates []string
 	for _, c := range allCapabilities {
-		got[string(c)] = true
+		value := string(c)
+		if got[value] {
+			duplicates = append(duplicates, value)
+		}
+		got[value] = true
 	}
 
 	seen := make(map[string]bool, len(wantValues))
@@ -83,9 +88,10 @@ func TestAllCapabilities_MatchesRendererGoConstCount(t *testing.T) {
 		}
 	}
 
-	if len(missing) > 0 || len(extra) > 0 {
+	if len(missing) > 0 || len(extra) > 0 || len(duplicates) > 0 {
 		sort.Strings(missing)
 		sort.Strings(extra)
-		t.Fatalf("allCapabilities is out of sync with renderer.go's Capability constants — missing: %v, extra (no longer a real constant): %v", missing, extra)
+		sort.Strings(duplicates)
+		t.Fatalf("allCapabilities is out of sync with renderer.go's Capability constants — missing: %v, extra (no longer a real constant): %v, duplicates: %v", missing, extra, duplicates)
 	}
 }

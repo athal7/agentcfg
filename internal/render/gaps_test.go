@@ -349,3 +349,125 @@ func TestDetectGaps_NoMCPServersNoGap(t *testing.T) {
 		t.Fatalf("got %d gaps, want 0: %+v", len(gaps), gaps)
 	}
 }
+
+func TestDetectGaps_AgentTaskPermissionDropped(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "build", Mode: "subagent", Permissions: registry.Permissions{Task: "deny"}},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	var found *Gap
+	for i := range gaps {
+		if gaps[i].Capability == CapAgentTaskPermission {
+			found = &gaps[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected an agent_task_permission gap, got %+v", gaps)
+	}
+	if found.Kind != GapSkip {
+		t.Errorf("got kind %s, want skip", found.Kind)
+	}
+	if found.Subject != "agent:build.permissions.task" {
+		t.Errorf("got subject %q, want agent:build.permissions.task", found.Subject)
+	}
+}
+
+func TestDetectGaps_AgentTaskPermissionSuppressedWhenDeclared(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "build", Mode: "subagent", Permissions: registry.Permissions{Task: "deny"}},
+		},
+	}
+
+	gaps := DetectGaps(reg, []Capability{CapAgentTaskPermission})
+
+	for _, g := range gaps {
+		if g.Capability == CapAgentTaskPermission {
+			t.Fatalf("did not expect agent_task_permission gap when declared, got %+v", g)
+		}
+	}
+}
+
+func TestDetectGaps_NoAgentTaskPermissionNoGap(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "build", Mode: "subagent"},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	for _, g := range gaps {
+		if g.Capability == CapAgentTaskPermission {
+			t.Fatalf("did not expect agent_task_permission gap when unset, got %+v", g)
+		}
+	}
+}
+
+func TestDetectGaps_MCPPerToolAskDropped(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "build", Mode: "subagent", MCP: []registry.AgentMCP{
+				{Server: "github", Ask: []string{"create_*"}},
+			}},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	var found *Gap
+	for i := range gaps {
+		if gaps[i].Capability == CapMCPPerToolAsk {
+			found = &gaps[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected an mcp_per_tool_ask gap, got %+v", gaps)
+	}
+	if found.Kind != GapSkip {
+		t.Errorf("got kind %s, want skip", found.Kind)
+	}
+	if found.Subject != "agent:build.mcp:github" {
+		t.Errorf("got subject %q, want agent:build.mcp:github", found.Subject)
+	}
+}
+
+func TestDetectGaps_MCPPerToolAskSuppressedWhenDeclared(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "build", Mode: "subagent", MCP: []registry.AgentMCP{
+				{Server: "github", Ask: []string{"create_*"}},
+			}},
+		},
+	}
+
+	gaps := DetectGaps(reg, []Capability{CapMCPPerToolAsk})
+
+	for _, g := range gaps {
+		if g.Capability == CapMCPPerToolAsk {
+			t.Fatalf("did not expect mcp_per_tool_ask gap when declared, got %+v", g)
+		}
+	}
+}
+
+func TestDetectGaps_NoMCPPerToolAskNoGap(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "build", Mode: "subagent", MCP: []registry.AgentMCP{
+				{Server: "github"},
+			}},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	for _, g := range gaps {
+		if g.Capability == CapMCPPerToolAsk {
+			t.Fatalf("did not expect mcp_per_tool_ask gap when no ask patterns set, got %+v", g)
+		}
+	}
+}

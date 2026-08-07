@@ -25,6 +25,8 @@ func DetectGaps(reg *registry.Registry, declared []Capability) []Gap {
 	gaps = append(gaps, detectPrimaryAgentGap(reg, has)...)
 	gaps = append(gaps, detectExternalDirectoryGaps(reg, has)...)
 	gaps = append(gaps, detectMCPToolGlobsGaps(reg, has)...)
+	gaps = append(gaps, detectAgentTaskPermissionGaps(reg, has)...)
+	gaps = append(gaps, detectMCPPerToolAskGaps(reg, has)...)
 	return gaps
 }
 
@@ -87,11 +89,10 @@ func detectPerAgentBashPolicyGap(reg *registry.Registry, has map[Capability]bool
 // declare CapPrimaryAgent (or CapPromptAppend as a substitute) and the
 // registry has a mode:primary agent.
 func detectPrimaryAgentGap(reg *registry.Registry, has map[Capability]bool) []Gap {
-	// CapPromptAppend is the documented substitute mechanism for
-	// CapPrimaryAgent: a harness that appends the primary agent's prompt
-	// as a whole-session system prompt has already expressed "there is a
-	// primary agent", just not via a default-agent key.
-	if has[CapPrimaryAgent] || has[CapPromptAppend] {
+	if has[CapPrimaryAgent] {
+		return nil
+	}
+	if sub, ok := SubstituteOf(CapPrimaryAgent); ok && has[sub] {
 		return nil
 	}
 	for _, a := range reg.Agents {
@@ -152,6 +153,57 @@ func detectMCPToolGlobsGaps(reg *registry.Registry, has map[Capability]bool) []G
 				s.Name,
 			),
 		})
+	}
+	return gaps
+}
+
+// detectAgentTaskPermissionGaps reports a GapSkip for every agent that sets
+// permissions.task when the renderer doesn't declare CapAgentTaskPermission.
+func detectAgentTaskPermissionGaps(reg *registry.Registry, has map[Capability]bool) []Gap {
+	if has[CapAgentTaskPermission] {
+		return nil
+	}
+	var gaps []Gap
+	for _, a := range reg.Agents {
+		if a.Permissions.Task == "" {
+			continue
+		}
+		gaps = append(gaps, Gap{
+			Kind:       GapSkip,
+			Capability: CapAgentTaskPermission,
+			Subject:    fmt.Sprintf("agent:%s.permissions.task", a.Name),
+			Detail: fmt.Sprintf(
+				"agent %q sets permissions.task=%q; this harness has no task-dispatch permission control, so subagent dispatch is always allowed.",
+				a.Name, a.Permissions.Task,
+			),
+		})
+	}
+	return gaps
+}
+
+// detectMCPPerToolAskGaps reports a GapSkip for every agent MCP entry that
+// sets per-tool ask patterns when the renderer doesn't declare
+// CapMCPPerToolAsk.
+func detectMCPPerToolAskGaps(reg *registry.Registry, has map[Capability]bool) []Gap {
+	if has[CapMCPPerToolAsk] {
+		return nil
+	}
+	var gaps []Gap
+	for _, a := range reg.Agents {
+		for _, m := range a.MCP {
+			if len(m.Ask) == 0 {
+				continue
+			}
+			gaps = append(gaps, Gap{
+				Kind:       GapSkip,
+				Capability: CapMCPPerToolAsk,
+				Subject:    fmt.Sprintf("agent:%s.mcp:%s", a.Name, m.Server),
+				Detail: fmt.Sprintf(
+					"agent %q's mcp server %q sets per-tool ask patterns %v; this harness has no per-tool ask-listing, so tools are either fully allowed or fully blocked at the server level.",
+					a.Name, m.Server, m.Ask,
+				),
+			})
+		}
 	}
 	return gaps
 }

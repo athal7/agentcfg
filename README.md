@@ -51,11 +51,15 @@ The registry is just a directory of YAML files at `~/.config/agentcfg/`. Edit th
 
 - [`docs/schema.md`](docs/schema.md) — the registry file layout and every
   field it supports, generated from the actual Go schema.
-- [`docs/capabilities.md`](docs/capabilities.md) — which renderer supports
-  which registry feature, generated from the actual code.
-- [`docs/wiring.md`](docs/wiring.md) — six ways to trigger `agentcfg apply`
-  automatically (shell hook, direnv, a session manager, a git hook, a
-  Makefile, CI).
+- [`docs/capabilities.md`](docs/capabilities.md) — a generated matrix of
+  which renderer supports which registry feature. A cell is `✓`
+  (implemented), `✗` (this harness genuinely has no equivalent — see the
+  gap notes below the table for why), or `≈` (the same underlying feature
+  is expressed through a different harness-native mechanism, e.g. omp's
+  appended system prompt instead of opencode's default-agent key — not a
+  gap, just a different shape).
+- [`docs/wiring.md`](docs/wiring.md) — two ways to trigger `agentcfg apply`
+  (a Makefile target, a CI step).
 
 ## License
 

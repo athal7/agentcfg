@@ -49,6 +49,7 @@ func (renderer) Capabilities() []render.Capability {
 		render.CapBashOrderedList,
 		render.CapGlobalBashPolicy,
 		render.CapMCPLocalTransport,
+		render.CapMCPRemoteTransport,
 		render.CapProjectModelPolicy,
 	}
 }

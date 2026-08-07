@@ -47,6 +47,7 @@ func (renderer) Capabilities() []render.Capability {
 		render.CapGlobalBashPolicy,
 		render.CapExternalDirectory,
 		render.CapMCPLocalTransport,
+		render.CapMCPRemoteTransport,
 		render.CapMCPToolGlobs,
 		render.CapMCPPerToolAsk,
 		render.CapProjectModelPolicy,

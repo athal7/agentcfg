@@ -103,10 +103,13 @@ func (r renderer) Render(reg *registry.Registry, _ render.Options) (*render.Plan
 	}
 	obj["mcp"] = mcpObj
 
+	managed := []string{"default_agent", "agent", "tools", "mcp", "model", "small_model"}
+	managed = append(managed, managedPermissionPaths()...)
+
 	plan.Outputs = append(plan.Outputs, render.MergeJSON{
 		Path:    configPath,
 		Mode:    0600,
-		Managed: []string{"default_agent", "permission", "agent", "tools", "mcp", "model", "small_model"},
+		Managed: managed,
 		Object:  obj,
 	})
 

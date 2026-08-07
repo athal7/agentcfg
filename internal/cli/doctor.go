@@ -27,16 +27,14 @@ var allCapabilities = []render.Capability{
 	render.CapAgentTaskPermission,
 	render.CapModelLiteralBinding,
 	render.CapModelClassBinding,
-	render.CapModelAliasOnly,
 	render.CapBashUnorderedMap,
 	render.CapBashOrderedList,
-	render.CapBashBucketedLists,
-	render.CapBashCoarseMode,
 	render.CapBashInteriorGlob,
 	render.CapPerAgentBashPolicy,
 	render.CapGlobalBashPolicy,
 	render.CapExternalDirectory,
 	render.CapMCPLocalTransport,
+	render.CapMCPRemoteTransport,
 	render.CapMCPToolGlobs,
 	render.CapMCPPerToolAsk,
 	render.CapProjectModelPolicy,
@@ -86,7 +84,12 @@ func runDoctor(out io.Writer, registryFlag string, markdown bool) {
 	printRegistryGaps(out, targets, reg)
 }
 
-// printCapabilityMatrix writes a table of which capabilities each target renderer supports.
+// printCapabilityMatrix writes a table of which capabilities each target
+// renderer supports. A capability with no direct declaration but a
+// declared render.SubstituteOf counterpart renders "≈" instead of "✗":
+// the underlying registry feature is still fully expressed, just via a
+// different harness-native mechanism (e.g. omp's prompt_append instead of
+// opencode's primary_agent default-agent key) — not a real gap.
 func printCapabilityMatrix(w io.Writer, targets []render.Renderer, caps []render.Capability, markdown bool) {
 	declared := make([]map[render.Capability]bool, len(targets))
 	for i, r := range targets {
@@ -97,9 +100,20 @@ func printCapabilityMatrix(w io.Writer, targets []render.Renderer, caps []render
 		declared[i] = m
 	}
 
+	type substitution struct {
+		target string
+		cap    render.Capability
+		via    render.Capability
+	}
+	var substituted []substitution
+
 	mark := func(i int, c render.Capability) string {
 		if declared[i][c] {
 			return "✓"
+		}
+		if via, ok := render.SubstituteOf(c); ok && declared[i][via] {
+			substituted = append(substituted, substitution{targets[i].ID(), c, via})
+			return "≈"
 		}
 		return "✗"
 	}
@@ -122,23 +136,30 @@ func printCapabilityMatrix(w io.Writer, targets []render.Renderer, caps []render
 			}
 			fmt.Fprintln(w)
 		}
-		return
-	}
-
-	tw := newTabWriter(w)
-	fmt.Fprint(tw, "CAPABILITY")
-	for _, r := range targets {
-		fmt.Fprintf(tw, "\t%s", r.ID())
-	}
-	fmt.Fprintln(tw)
-	for _, c := range caps {
-		fmt.Fprintf(tw, "%s", c)
-		for i := range targets {
-			fmt.Fprintf(tw, "\t%s", mark(i, c))
+	} else {
+		tw := newTabWriter(w)
+		fmt.Fprint(tw, "CAPABILITY")
+		for _, r := range targets {
+			fmt.Fprintf(tw, "\t%s", r.ID())
 		}
 		fmt.Fprintln(tw)
+		for _, c := range caps {
+			fmt.Fprintf(tw, "%s", c)
+			for i := range targets {
+				fmt.Fprintf(tw, "\t%s", mark(i, c))
+			}
+			fmt.Fprintln(tw)
+		}
+		tw.Flush()
 	}
-	tw.Flush()
+
+	if len(substituted) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "≈ = same underlying feature, expressed via a different harness-native mechanism (not a gap):")
+		for _, s := range substituted {
+			fmt.Fprintf(w, "%s  %s — via %s\n", s.target, s.cap, s.via)
+		}
+	}
 }
 
 // printRegistryGaps writes each target's rendering gaps against the given registry.

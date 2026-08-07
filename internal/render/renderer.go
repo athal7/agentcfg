@@ -30,11 +30,8 @@ const (
 	CapAgentTaskPermission Capability = "agent_task_permission"
 	CapModelLiteralBinding Capability = "model_literal_binding"
 	CapModelClassBinding   Capability = "model_class_binding"
-	CapModelAliasOnly      Capability = "model_alias_only"
 	CapBashUnorderedMap    Capability = "bash_unordered_map"
 	CapBashOrderedList     Capability = "bash_ordered_list"
-	CapBashBucketedLists   Capability = "bash_bucketed_lists"
-	CapBashCoarseMode      Capability = "bash_coarse_mode"
 	CapBashInteriorGlob    Capability = "bash_interior_glob"
 	CapPerAgentBashPolicy  Capability = "per_agent_bash_policy"
 	CapGlobalBashPolicy    Capability = "global_bash_policy"
@@ -45,6 +42,40 @@ const (
 	CapMCPPerToolAsk       Capability = "mcp_per_tool_ask"
 	CapProjectModelPolicy  Capability = "project_model_policy"
 )
+
+// capabilitySubstitutePairs lists every pair of capabilities that express
+// the same underlying registry feature via two different harness-native
+// mechanisms — a renderer declaring either one has already covered the
+// feature, not left a gap. See detectPrimaryAgentGap for the canonical
+// case: a default-agent key (CapPrimaryAgent) vs. appending the primary
+// agent's prompt as a whole-session system prompt (CapPromptAppend).
+// CapModelLiteralBinding/CapModelClassBinding is the model-binding
+// equivalent (embed the resolved literal vs. reference the class name and
+// let the harness resolve it), and CapBashUnorderedMap/CapBashOrderedList
+// is bash policy's (a glob-to-decision map vs. its specificity-ordered
+// projection — bashpolicy.AsOrderedList is proven equivalent to the
+// unordered most-specific-match semantics by
+// TestDifferential_OrderedMatchesUnordered).
+var capabilitySubstitutePairs = [][2]Capability{
+	{CapPrimaryAgent, CapPromptAppend},
+	{CapModelLiteralBinding, CapModelClassBinding},
+	{CapBashUnorderedMap, CapBashOrderedList},
+}
+
+// SubstituteOf returns the capability that, if declared, satisfies the
+// same underlying registry feature as c via a different harness-native
+// mechanism, and whether c has a registered substitute at all.
+func SubstituteOf(c Capability) (Capability, bool) {
+	for _, pair := range capabilitySubstitutePairs {
+		switch c {
+		case pair[0]:
+			return pair[1], true
+		case pair[1]:
+			return pair[0], true
+		}
+	}
+	return "", false
+}
 
 // Options carries render-time inputs that aren't part of the registry
 // itself.

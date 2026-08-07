@@ -265,10 +265,7 @@ func TestRender_NoPrimaryAgentOmitsDefaultAgent(t *testing.T) {
 func TestCapabilities_ExcludesUndeclaredOnes(t *testing.T) {
 	excluded := map[render.Capability]bool{
 		render.CapBashOrderedList:   true,
-		render.CapBashBucketedLists: true,
-		render.CapBashCoarseMode:    true,
 		render.CapModelClassBinding: true,
-		render.CapModelAliasOnly:    true,
 		render.CapPromptAppend:      true,
 	}
 	for _, c := range New().Capabilities() {

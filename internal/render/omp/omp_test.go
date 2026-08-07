@@ -298,6 +298,7 @@ func TestCapabilities_OnlyDeclaresWhatIsBuilt(t *testing.T) {
 		render.CapBashOrderedList:    true,
 		render.CapGlobalBashPolicy:   true,
 		render.CapMCPLocalTransport:  true,
+		render.CapMCPRemoteTransport: true,
 		render.CapProjectModelPolicy: true,
 	}
 	got := New().Capabilities()

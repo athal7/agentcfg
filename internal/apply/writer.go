@@ -195,12 +195,12 @@ func writeFileContent(path string, content []byte, mode fs.FileMode) (err error)
 	}()
 
 	if _, werr := tmp.Write(content); werr != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		err = fmt.Errorf("writing %s: %w", target, werr)
 		return err
 	}
 	if cerr := tmp.Chmod(mode); cerr != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		err = fmt.Errorf("setting permissions on %s: %w", target, cerr)
 		return err
 	}

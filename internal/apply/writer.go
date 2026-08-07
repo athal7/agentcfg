@@ -121,26 +121,69 @@ func applyWriteFile(w render.WriteFile) (applied, skipped string, err error) {
 	return fmt.Sprintf("wrote %s", path), "", nil
 }
 
-// writeFileContent creates path's parent directory if needed, writes
+// resolveWriteTarget follows path if it is a symlink, returning the real
+// file it points to. writeFileContent writes through this resolved path
+// instead of path itself so that os.Rename never replaces an externally
+// managed symlink (e.g. one chezmoi points at a dotfiles repo) — it
+// updates what the symlink points to and leaves the symlink in place.
+//
+// Relative symlink targets are resolved against the symlink's own
+// directory; chains of symlinks are followed to their end. A target that
+// doesn't exist yet (a dangling symlink) is returned as-is rather than
+// treated as an error — writeFileContent creates it fresh, same as it
+// would for any other missing path.
+func resolveWriteTarget(path string) (string, error) {
+	const maxDepth = 40
+	for range maxDepth {
+		info, err := os.Lstat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return path, nil
+			}
+			return "", err
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return path, nil
+		}
+		link, err := os.Readlink(path)
+		if err != nil {
+			return "", fmt.Errorf("reading symlink %s: %w", path, err)
+		}
+		if !filepath.IsAbs(link) {
+			link = filepath.Join(filepath.Dir(path), link)
+		}
+		path = link
+	}
+	return "", fmt.Errorf("too many levels of symbolic links: %s", path)
+}
+
+// writeFileContent creates target's parent directory if needed, writes
 // content to a temporary file in the same directory, then atomically
 // renames it onto the final path. This prevents partial/corrupt files
 // on timeout or crash — the rename is atomic on the same filesystem,
 // so readers always see either the old file or the new file, never a
-// partially-written one.
+// partially-written one. If path is a symlink, target is its resolved
+// destination (see resolveWriteTarget) — the write lands there, and the
+// symlink itself is left untouched.
 //
 // Callers are responsible for any git-tracked guard — this helper is
 // also used by RebuildDir, whose individual Files are intentionally NOT
 // git-guarded (the whole directory is renderer-owned; see
 // applyRebuildDir).
-func writeFileContent(path string, content []byte, mode fs.FileMode) error {
-	dir := filepath.Dir(path)
+func writeFileContent(path string, content []byte, mode fs.FileMode) (err error) {
+	target, err := resolveWriteTarget(path)
+	if err != nil {
+		return fmt.Errorf("resolving symlink for %s: %w", path, err)
+	}
+
+	dir := filepath.Dir(target)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("creating directory for %s: %w", path, err)
+		return fmt.Errorf("creating directory for %s: %w", target, err)
 	}
 
 	tmp, err := os.CreateTemp(dir, ".agentcfg-*")
 	if err != nil {
-		return fmt.Errorf("creating temp file for %s: %w", path, err)
+		return fmt.Errorf("creating temp file for %s: %w", target, err)
 	}
 	tmpName := tmp.Name()
 
@@ -151,19 +194,23 @@ func writeFileContent(path string, content []byte, mode fs.FileMode) error {
 		}
 	}()
 
-	if _, err := tmp.Write(content); err != nil {
+	if _, werr := tmp.Write(content); werr != nil {
 		tmp.Close()
-		return fmt.Errorf("writing %s: %w", path, err)
+		err = fmt.Errorf("writing %s: %w", target, werr)
+		return err
 	}
-	if err := tmp.Chmod(mode); err != nil {
+	if cerr := tmp.Chmod(mode); cerr != nil {
 		tmp.Close()
-		return fmt.Errorf("setting permissions on %s: %w", path, err)
+		err = fmt.Errorf("setting permissions on %s: %w", target, cerr)
+		return err
 	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("closing %s: %w", path, err)
+	if cerr := tmp.Close(); cerr != nil {
+		err = fmt.Errorf("closing %s: %w", target, cerr)
+		return err
 	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("renaming %s to %s: %w", tmpName, path, err)
+	if rerr := os.Rename(tmpName, target); rerr != nil {
+		err = fmt.Errorf("renaming %s to %s: %w", tmpName, target, rerr)
+		return err
 	}
 	return nil
 }

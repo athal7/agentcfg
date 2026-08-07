@@ -3,6 +3,7 @@ package opencode
 import (
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/athal7/agentcfg/internal/registry"
@@ -78,6 +79,35 @@ func TestRender_LeadAndBuildWithOneMCPServer(t *testing.T) {
 	}
 	if out.Path != "~/.config/opencode/opencode.json" {
 		t.Errorf("got path %q, want ~/.config/opencode/opencode.json", out.Path)
+	}
+
+	// permission must never appear as a bare managed path: per merge.go,
+	// a path ending mid-object is a full subtree replace, which would
+	// silently drop any permission.* key Render doesn't itself emit (e.g.
+	// a hand-set permission.external_directory — see #7). Each leaf
+	// Render owns must be its own managed path instead.
+	for _, bare := range out.Managed {
+		if bare == "permission" {
+			t.Fatal("Managed contains bare \"permission\" — this replaces the whole subtree and drops unmanaged keys like external_directory")
+		}
+	}
+	wantPermissionLeaves := []string{
+		"permission.bash",
+		"permission.edit",
+		"permission.read",
+		"permission.skill",
+		"permission.task",
+		"permission.webfetch",
+		"permission.write",
+	}
+	var gotPermissionLeaves []string
+	for _, m := range out.Managed {
+		if strings.HasPrefix(m, "permission.") {
+			gotPermissionLeaves = append(gotPermissionLeaves, m)
+		}
+	}
+	if !reflect.DeepEqual(gotPermissionLeaves, wantPermissionLeaves) {
+		t.Errorf("permission managed leaves = %v, want %v", gotPermissionLeaves, wantPermissionLeaves)
 	}
 
 	want := map[string]any{

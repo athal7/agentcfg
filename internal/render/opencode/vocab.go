@@ -1,6 +1,10 @@
 package opencode
 
-import "github.com/athal7/agentcfg/internal/vocab"
+import (
+	"sort"
+
+	"github.com/athal7/agentcfg/internal/vocab"
+)
 
 // permissionKey maps a canonical tool/permission name to opencode's native
 // permission.<key> field name, for canonicals that render as a static
@@ -30,4 +34,23 @@ var unsupportedCanonicals = map[vocab.Canonical]bool{
 	vocab.Todo:         true,
 	vocab.ASTSearch:    true,
 	vocab.ImageInspect: true,
+}
+
+// managedPermissionPaths returns the leaf-level "permission.<key>" paths
+// Render actually owns: permission.bash (the compiled bash policy) plus
+// one leaf per permissionKey entry (read/edit/write/task/skill/webfetch).
+// Render must manage these leaves individually rather than the bare
+// "permission" path — per merge.go's semantics, a managed path ending
+// mid-object is a full subtree replace, which would silently delete any
+// permission.* key Render doesn't itself emit (e.g. a hand-set
+// permission.external_directory) on every apply. Sorted for a
+// deterministic, reproducible Plan.
+func managedPermissionPaths() []string {
+	paths := make([]string, 0, len(permissionKey)+1)
+	paths = append(paths, "permission.bash")
+	for _, key := range permissionKey {
+		paths = append(paths, "permission."+key)
+	}
+	sort.Strings(paths)
+	return paths
 }

@@ -1,32 +1,22 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/athal7/agentcfg/internal/apply"
 )
 
-// defaultBestEffortTimeout is the timeout used when --best-effort is enabled
-// but no explicit --timeout flag is provided.
-const defaultBestEffortTimeout = 5 * time.Second
-
-// applyOptions extends renderOptions with --best-effort and --timeout flags
-// specific to the apply command.
+// applyOptions extends renderOptions with flags specific to the apply command.
 type applyOptions struct {
 	renderOptions
-	bestEffort bool
-	timeout    time.Duration
 }
 
 // newApplyCmd creates the `apply` subcommand that renders and writes native
-// harness configuration, with --best-effort and --strict modifiers.
+// harness configuration, with a --strict modifier.
 func newApplyCmd() *cobra.Command {
 	var opts applyOptions
 
@@ -38,44 +28,12 @@ func newApplyCmd() *cobra.Command {
 		},
 	}
 	registerRenderFlags(cmd, &opts.renderOptions)
-	cmd.Flags().BoolVar(&opts.bestEffort, "best-effort", false, "swallow every error and always exit 0 (also via AGENTCFG_BEST_EFFORT=1)")
-	cmd.Flags().DurationVar(&opts.timeout, "timeout", defaultBestEffortTimeout, "abandon and exit 0 after this long (only meaningful with --best-effort)")
 
 	return cmd
 }
 
-// runApplyCmd resolves the --strict/--best-effort interaction, then
-// dispatches to the best-effort or normal apply path.
-//
-// Mutual exclusion rule: --strict and --best-effort are contradictory (one
-// says "fail loudly on any gap", the other says "never fail, ever") and
-// explicitly setting both via flags is an error. AGENTCFG_BEST_EFFORT=1 is
-// different: it's an ambient default (e.g. set in a shell profile for
-// every invocation), not a one-off explicit choice, so an explicit
-// --strict flag on a single invocation overrides it rather than erroring —
-// the more specific, more recently-stated intent (the flag on this
-// command line) wins over the broader ambient one (the env var).
+// runApplyCmd dispatches to the normal apply path.
 func runApplyCmd(cmd *cobra.Command, opts applyOptions) error {
-	bestEffortFromFlag := cmd.Flags().Changed("best-effort")
-	strictFromFlag := cmd.Flags().Changed("strict")
-	bestEffortFromEnv := os.Getenv("AGENTCFG_BEST_EFFORT") == "1"
-
-	if bestEffortFromFlag && opts.bestEffort && strictFromFlag {
-		return fmt.Errorf("apply: --strict and --best-effort are mutually exclusive")
-	}
-
-	bestEffort := bestEffortFromEnv
-	if bestEffortFromFlag {
-		bestEffort = opts.bestEffort
-	}
-	if strictFromFlag {
-		bestEffort = false
-	}
-
-	if bestEffort {
-		runApplyBestEffort(opts)
-		return nil
-	}
 	return runApplyNormal(cmd.OutOrStdout(), opts)
 }
 
@@ -129,64 +87,4 @@ func applyPlans(plans []targetPlan) ([]applyOutcome, error) {
 		outcomes = append(outcomes, applyOutcomeFrom(p, result))
 	}
 	return outcomes, errors.Join(errs...)
-}
-
-// runApplyBestEffort is the silent contract: NOTHING is ever written to
-// stdout, the process always behaves as a success (the caller always
-// treats this as exit 0 — see runApplyCmd), and every failure mode —
-// registry load failure, no git repo, no origin remote, an unparseable
-// remote, no matching context, an apply error, or a panic anywhere in the
-// work — is swallowed. Diagnostics go to stderr ONLY when
-// AGENTCFG_DEBUG=1. The work runs in a goroutine so --timeout can actually
-// abandon it: on timeout we stop waiting and return, we don't (can't,
-// without deeper plumbing) forcibly kill in-flight I/O — "abandon" per the
-// spec means the CLI stops waiting and exits, accepting that a detached
-// write may or may not still complete before the process exits.
-func runApplyBestEffort(opts applyOptions) {
-	defer func() {
-		if r := recover(); r != nil {
-			debugf("agentcfg apply: panic recovered: %v", r)
-		}
-	}()
-
-	timeout := opts.timeout
-	if timeout <= 0 {
-		timeout = defaultBestEffortTimeout
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		defer func() {
-			if r := recover(); r != nil {
-				debugf("agentcfg apply: panic recovered: %v", r)
-			}
-		}()
-
-		plans, err := loadAndBuildPlans(opts.registry, opts.target, opts.scope, opts.contextDir)
-		if err != nil {
-			debugf("agentcfg apply: %v", err)
-			return
-		}
-		if _, err := applyPlans(plans); err != nil {
-			debugf("agentcfg apply: %v", err)
-		}
-	}()
-
-	select {
-	case <-done:
-	case <-ctx.Done():
-		debugf("agentcfg apply: timed out after %s, abandoning", timeout)
-	}
-}
-
-// debugf writes a diagnostic line to stderr only when AGENTCFG_DEBUG=1 is
-// set — the one sanctioned leak in --best-effort's otherwise-silent
-// contract, and it's stderr-only, never stdout.
-func debugf(format string, args ...any) {
-	if os.Getenv("AGENTCFG_DEBUG") == "1" {
-		fmt.Fprintf(os.Stderr, format+"\n", args...)
-	}
 }

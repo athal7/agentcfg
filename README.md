@@ -41,7 +41,7 @@ needs that CLI actually installed; `apply` still writes everything else it
 can and reports each target's outcome, but returns non-zero if any step
 failed. Use `--target opencode` (or `--target omp`) to scope a run to just
 one harness. See `agentcfg apply --help` and `docs/wiring.md` for the full
-flag set (`--scope`, `--context`, `--strict`, `--best-effort`, ...).
+flag set (`--scope`, `--context`, `--strict`, ...).
 
 ## Managing your registry
 

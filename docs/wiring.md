@@ -6,8 +6,8 @@ already work. None of these is the "one true way"; `agentcfg` itself has
 no opinion about which caller invokes it.
 
 The flags used below (`--scope`, `--context`, `--strict`) are real, existing
-flags on `agentcfg render`/`agentcfg apply` — see `agentcfg apply --help` or
-`docs/capabilities.md`'s neighbor, `docs/schema.md`, for the full flag list.
+flags on `agentcfg render`/`agentcfg apply` — see `agentcfg apply --help`
+for the full flag list.
 
 ## 1. Makefile target
 
@@ -33,7 +33,7 @@ without writing any files:
 
 `agentcfg apply` always fails loudly on real errors — a broken registry, a
 disagreeing renderer, or a write failure produces a real exit code and a real
-error message. There is no `--best-effort` flag: `apply`'s work (read local
-YAML, validate, render in-memory, write local files) is deterministic, so a
-failure on one invocation fails the same way on every invocation. Silent
-swallow-on-failure would hide a persistent bug with no record anywhere.
+error message. There is no `--best-effort` flag: the registry read, validation,
+and in-memory rendering are deterministic, so a bad registry will reliably
+produce nonzero exits and returned errors. Silent swallow-on-failure would
+hide a persistent bug with no record anywhere.

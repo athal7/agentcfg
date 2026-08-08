@@ -138,7 +138,7 @@ func TestValidate_CommandPromptRequiresExactlyOneOfFileOrText(t *testing.T) {
 		{
 			name:    "neither",
 			prompt:  ``,
-			wantMsg: `must set exactly one of prompt.file or prompt.text`,
+			wantMsg: `must set exactly one of prompt or steps`,
 		},
 		{
 			name:    "both",

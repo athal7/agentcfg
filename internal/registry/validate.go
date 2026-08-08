@@ -104,27 +104,7 @@ func validateAgents(reg *Registry) []ValidationError {
 			})
 		}
 
-		switch {
-		case a.Prompt.File == "" && a.Prompt.Text == "":
-			errs = append(errs, ValidationError{
-				Message: fmt.Sprintf("agent %q must set exactly one of prompt.file or prompt.text", a.Name),
-			})
-		case a.Prompt.File != "" && a.Prompt.Text != "":
-			errs = append(errs, ValidationError{
-				Message: fmt.Sprintf("agent %q must set exactly one of prompt.file or prompt.text, not both", a.Name),
-			})
-		case a.Prompt.File != "":
-			violates, resolved := promptFileTraversal(reg.RootDir, rootReal, a.Prompt.File)
-			if violates {
-				errs = append(errs, ValidationError{
-					Message: fmt.Sprintf("prompt file escapes registry root: %s", a.Prompt.File),
-				})
-			} else if _, err := os.Stat(resolved); err != nil {
-				errs = append(errs, ValidationError{
-					Message: fmt.Sprintf("referenced prompt file does not exist: %s", resolved),
-				})
-			}
-		}
+		errs = append(errs, validatePromptField(a.Prompt, fmt.Sprintf("agent %q", a.Name), reg.RootDir, rootReal)...)
 
 		if !a.Permissions.Bash.IsZero() {
 			if a.Permissions.Bash.Profile != "" {
@@ -278,7 +258,35 @@ func isValidCommandName(name string) bool {
 	return true
 }
 
-// validateCommands reports errors in the registry's commands section.
+// validatePromptField reports errors in a single Prompt field: exactly
+// one of file/text must be set, and a file-backed prompt must resolve
+// inside the registry root and exist on disk. subject is a
+// pre-formatted description of the owning entity (e.g. `agent "lead"`,
+// `command "review" step "plan"`) used verbatim in error messages.
+// Shared by Agent, Command, and CommandStep — every prompt-bearing
+// registry entity validates its prompt identically.
+func validatePromptField(p Prompt, subject, rootDir, rootReal string) []ValidationError {
+	switch {
+	case p.File == "" && p.Text == "":
+		return []ValidationError{{Message: fmt.Sprintf("%s must set exactly one of prompt.file or prompt.text", subject)}}
+	case p.File != "" && p.Text != "":
+		return []ValidationError{{Message: fmt.Sprintf("%s must set exactly one of prompt.file or prompt.text, not both", subject)}}
+	case p.File != "":
+		violates, resolved := promptFileTraversal(rootDir, rootReal, p.File)
+		if violates {
+			return []ValidationError{{Message: fmt.Sprintf("prompt file escapes registry root: %s", p.File)}}
+		}
+		if _, err := os.Stat(resolved); err != nil {
+			return []ValidationError{{Message: fmt.Sprintf("referenced prompt file does not exist: %s", resolved)}}
+		}
+	}
+	return nil
+}
+
+// validateCommands reports errors in the registry's commands section. A
+// command is exactly one of two shapes: a flat prompt, or an ordered
+// list of named steps (a structured multi-step workflow command — see
+// Command's doc comment).
 func validateCommands(reg *Registry) []ValidationError {
 	var errs []ValidationError
 
@@ -304,25 +312,30 @@ func validateCommands(reg *Registry) []ValidationError {
 			errs = append(errs, ValidationError{Message: fmt.Sprintf("command %q has no description", c.Name)})
 		}
 
+		hasPrompt := c.Prompt.File != "" || c.Prompt.Text != ""
+		hasSteps := len(c.Steps) > 0
 		switch {
-		case c.Prompt.File == "" && c.Prompt.Text == "":
+		case hasPrompt && hasSteps:
 			errs = append(errs, ValidationError{
-				Message: fmt.Sprintf("command %q must set exactly one of prompt.file or prompt.text", c.Name),
+				Message: fmt.Sprintf("command %q must set exactly one of prompt or steps, not both", c.Name),
 			})
-		case c.Prompt.File != "" && c.Prompt.Text != "":
+		case !hasPrompt && !hasSteps:
 			errs = append(errs, ValidationError{
-				Message: fmt.Sprintf("command %q must set exactly one of prompt.file or prompt.text, not both", c.Name),
+				Message: fmt.Sprintf("command %q must set exactly one of prompt or steps", c.Name),
 			})
-		case c.Prompt.File != "":
-			violates, resolved := promptFileTraversal(reg.RootDir, rootReal, c.Prompt.File)
-			if violates {
-				errs = append(errs, ValidationError{
-					Message: fmt.Sprintf("prompt file escapes registry root: %s", c.Prompt.File),
-				})
-			} else if _, err := os.Stat(resolved); err != nil {
-				errs = append(errs, ValidationError{
-					Message: fmt.Sprintf("referenced prompt file does not exist: %s", resolved),
-				})
+		case hasPrompt:
+			errs = append(errs, validatePromptField(c.Prompt, fmt.Sprintf("command %q", c.Name), reg.RootDir, rootReal)...)
+		case hasSteps:
+			seenStepNames := map[string]bool{}
+			for _, s := range c.Steps {
+				if s.Name == "" {
+					errs = append(errs, ValidationError{Message: fmt.Sprintf("command %q has a step with no name", c.Name)})
+				} else if seenStepNames[s.Name] {
+					errs = append(errs, ValidationError{Message: fmt.Sprintf("command %q has duplicate step name %q", c.Name, s.Name)})
+				} else {
+					seenStepNames[s.Name] = true
+				}
+				errs = append(errs, validatePromptField(s.Prompt, fmt.Sprintf("command %q step %q", c.Name, s.Name), reg.RootDir, rootReal)...)
 			}
 		}
 	}

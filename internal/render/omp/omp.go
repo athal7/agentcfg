@@ -88,6 +88,7 @@ func (renderer) Capabilities() []render.Capability {
 		render.CapMCPRemoteTransport,
 		render.CapProjectModelPolicy,
 		render.CapCustomCommands,
+		render.CapStructuredWorkflowCommand,
 	}
 }
 

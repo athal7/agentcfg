@@ -44,14 +44,27 @@ const (
 	CapMCPPerToolAsk              Capability = "mcp_per_tool_ask"
 	CapProjectModelPolicy         Capability = "project_model_policy"
 
-	// CapCustomCommands marks support for flat, single-prompt custom
-	// commands (registry.Command), rendered as Agent Skills SKILL.md
-	// files. Unlike CapPrimaryAgent/CapPromptAppend, this capability has
-	// no registered substitute pair: both opencode and omp are confirmed
-	// to discover the identical Agent Skills path natively, so both
-	// declare it directly (see internal/render/commands.go) rather than
-	// one declaring a differently-shaped equivalent.
+	// CapCustomCommands marks support for custom commands (registry.Command),
+	// rendered as Agent Skills SKILL.md files. Covers both a flat,
+	// single-prompt command and a structured multi-step command flattened
+	// into numbered prose — see CapStructuredWorkflowCommand for the
+	// latter's native (non-flattened) rendering path. Unlike
+	// CapPrimaryAgent/CapPromptAppend, this capability has no registered
+	// substitute pair: both opencode and omp are confirmed to discover the
+	// identical Agent Skills path natively, so both declare it directly
+	// (see internal/render/commands.go) rather than one declaring a
+	// differently-shaped equivalent.
 	CapCustomCommands Capability = "custom_commands"
+
+	// CapStructuredWorkflowCommand marks support for rendering a
+	// multi-step command (registry.Command.Steps) into a harness's
+	// native structured-workflow mechanism, instead of flattening the
+	// steps into plain numbered prose (which CapCustomCommands alone
+	// still does on any renderer). Currently only omp declares this,
+	// via its `workflowz` magic keyword — see
+	// internal/render/commands.go's workflowzDirective and
+	// athal7/agentcfg#3.
+	CapStructuredWorkflowCommand Capability = "structured_workflow_command"
 )
 
 // capabilitySubstitutePairs lists every pair of capabilities that express

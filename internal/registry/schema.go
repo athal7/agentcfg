@@ -159,21 +159,41 @@ type Agent struct {
 	ResolvedPromptFile string `yaml:"-"`
 }
 
-// Command is one entry under commands.yaml's commands: list — a flat,
-// single-prompt custom agent command (opencode-style slash command / an
-// Agent Skills SKILL.md), as opposed to a multi-step workflow (a separate,
-// not-yet-built concept). Unlike Agent and MCPServer, Command has no
-// Targets field: it renders to one harness-agnostic Agent Skills path
-// every current renderer discovers identically — see
-// internal/render/commands.go and docs/schema.md's commands: section.
+// Command is one entry under commands.yaml's commands: list — a custom
+// agent command (opencode-style slash command / an Agent Skills
+// SKILL.md). Unlike Agent and MCPServer, Command has no Targets field:
+// it renders to one harness-agnostic Agent Skills path every current
+// renderer discovers identically — see internal/render/commands.go and
+// docs/schema.md's commands: section.
+//
+// A command is exactly one of two shapes: flat (Prompt set, a single
+// prose instruction) or a structured multi-step workflow (Steps set, an
+// ordered sequence of named phases). Both render to the same SKILL.md
+// path; the multi-step shape additionally triggers a harness's native
+// structured-workflow mechanism where one exists (omp's `workflowz`
+// magic keyword — see render.CapStructuredWorkflowCommand) and falls
+// back to flattened, numbered prose where it doesn't (opencode).
 type Command struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
-	Prompt      Prompt `yaml:"prompt"`
+	Name        string        `yaml:"name"`
+	Description string        `yaml:"description"`
+	Prompt      Prompt        `yaml:"prompt,omitempty"`
+	Steps       []CommandStep `yaml:"steps,omitempty"`
 
 	// ResolvedPromptFile is populated by Load (see resolve.go) as the
 	// absolute path of Prompt.File resolved against the registry root.
-	// Empty when the command uses Prompt.Text instead.
+	// Empty when the command uses Prompt.Text or Steps instead.
+	ResolvedPromptFile string `yaml:"-"`
+}
+
+// CommandStep is one entry under a structured command's steps: list — a
+// named phase of a multi-step workflow command.
+type CommandStep struct {
+	Name   string `yaml:"name"`
+	Prompt Prompt `yaml:"prompt"`
+
+	// ResolvedPromptFile is populated by Load (see resolve.go) as the
+	// absolute path of Prompt.File resolved against the registry root.
+	// Empty when the step uses Prompt.Text instead.
 	ResolvedPromptFile string `yaml:"-"`
 }
 

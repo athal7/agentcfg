@@ -556,7 +556,6 @@ func TestDetectGaps_NoMCPPerToolAskNoGap(t *testing.T) {
 	}
 }
 
-
 func TestDetectGaps_MCPToolGlobsAndPerToolAskCombineIndependently(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{

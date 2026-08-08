@@ -30,6 +30,7 @@ func DetectGaps(reg *registry.Registry, declared []Capability) []Gap {
 	gaps = append(gaps, detectMCPPerToolAskGaps(reg, has)...)
 	gaps = append(gaps, detectComposeIntoPrimaryGaps(reg, has)...)
 	gaps = append(gaps, detectCustomCommandsGap(reg, has)...)
+	gaps = append(gaps, detectStructuredWorkflowCommandGaps(reg, has)...)
 	return gaps
 }
 
@@ -311,6 +312,36 @@ func detectCustomCommandsGap(reg *registry.Registry, has map[Capability]bool) []
 			Detail: fmt.Sprintf(
 				"command %q has no Agent Skills (SKILL.md) support in this harness, so it was dropped entirely.",
 				c.Name,
+			),
+		})
+	}
+	return gaps
+}
+
+// detectStructuredWorkflowCommandGaps reports a GapReduction for every
+// multi-step command (len(Steps) > 0) when the renderer doesn't declare
+// CapStructuredWorkflowCommand. Informational only — RenderCommands
+// writes identical content regardless of which renderer is asking (see
+// its doc comment), so nothing is actually dropped or altered here; this
+// just surfaces that the current renderer's harness won't interpret the
+// rendered workflowz trigger, so the command behaves as flattened,
+// numbered prose there instead of a deterministic multi-phase pipeline.
+func detectStructuredWorkflowCommandGaps(reg *registry.Registry, has map[Capability]bool) []Gap {
+	if has[CapStructuredWorkflowCommand] {
+		return nil
+	}
+	var gaps []Gap
+	for _, c := range reg.Commands {
+		if len(c.Steps) == 0 {
+			continue
+		}
+		gaps = append(gaps, Gap{
+			Kind:       GapReduction,
+			Capability: CapStructuredWorkflowCommand,
+			Subject:    fmt.Sprintf("command:%s", c.Name),
+			Detail: fmt.Sprintf(
+				"command %q has %d steps; this harness has no native structured-workflow mechanism, so it behaves as flattened, numbered prose here instead of a deterministic multi-phase pipeline.",
+				c.Name, len(c.Steps),
 			),
 		})
 	}

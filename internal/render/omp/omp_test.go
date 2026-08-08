@@ -613,17 +613,18 @@ func TestRender_AdvisoryWithoutPrimaryFallsBackToStandaloneFile(t *testing.T) {
 
 func TestCapabilities_OnlyDeclaresWhatIsBuilt(t *testing.T) {
 	want := map[render.Capability]bool{
-		render.CapAgentDefinitions:   true,
-		render.CapComposeIntoPrimary: true,
-		render.CapPromptAppend:       true,
-		render.CapPromptFileRef:      true,
-		render.CapModelClassBinding:  true,
-		render.CapBashOrderedList:    true,
-		render.CapGlobalBashPolicy:   true,
-		render.CapMCPLocalTransport:  true,
-		render.CapMCPRemoteTransport: true,
-		render.CapProjectModelPolicy: true,
-		render.CapCustomCommands:     true,
+		render.CapAgentDefinitions:          true,
+		render.CapComposeIntoPrimary:        true,
+		render.CapPromptAppend:              true,
+		render.CapPromptFileRef:             true,
+		render.CapModelClassBinding:         true,
+		render.CapBashOrderedList:           true,
+		render.CapGlobalBashPolicy:          true,
+		render.CapMCPLocalTransport:         true,
+		render.CapMCPRemoteTransport:        true,
+		render.CapProjectModelPolicy:        true,
+		render.CapCustomCommands:            true,
+		render.CapStructuredWorkflowCommand: true,
 	}
 	got := New().Capabilities()
 	if len(got) != len(want) {

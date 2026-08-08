@@ -40,6 +40,7 @@ of these top-level keys — a single "union" shape backs every file:
 | `agents` | list of agent objects | `Registry.Agents` |
 | `mcp_servers` | list of MCP server objects | `Registry.MCPServers` |
 | `contexts` | list of context objects | `Registry.Contexts` |
+| `commands` | list of command objects | `Registry.Commands` |
 
 ### `imports:`
 
@@ -347,6 +348,67 @@ At least one of `git_remote_host`/`git_remote_owner` is required per
 context entry. An unset match field acts as a wildcard (matches anything);
 both set means both must match.
 
+## `commands:`
+
+```yaml
+commands:
+  - name: review
+    description: "Reviews the current diff for correctness and style"
+    prompt:
+      text: "Review the current diff for correctness, style, and test coverage."
+      # — or —
+      # file: prompts/review.md
+```
+
+A flat, single-prompt custom agent command (opencode's slash-command
+feature) — no multi-step/workflow structure. Each entry is a `Command`:
+
+| field | yaml tag | type | notes |
+|---|---|---|---|
+| `Name` | `name` | string | required, unique across all commands; must satisfy the Agent Skills spec's naming rule — lowercase letters, digits, and hyphens only, no leading or trailing hyphen, at most 64 characters |
+| `Description` | `description` | string | required |
+| `Prompt` | `prompt` | object | exactly one of `file` or `text` — same shape and validation as an agent's `prompt` |
+
+Unlike `agents:`/`mcp_servers:`, `Command` has **no `targets:` field**.
+`Agent.Targets`/`MCPServer.Targets` exist because those entities render to
+genuinely different, harness-owned artifacts. A command's rendered
+artifact is the identical file for every harness that reads it — there's
+no per-harness shape to opt a command out of (see "Rendering" below).
+
+### Rendering: Agent Skills `SKILL.md`
+
+Every command renders to `~/.agents/skills/<name>/SKILL.md`:
+
+```markdown
+---
+name: review
+description: Reviews the current diff for correctness and style
+---
+Review the current diff for correctness, style, and test coverage.
+```
+
+This targets the open [Agent Skills](https://agentskills.io) standard
+rather than opencode's original, now-legacy `.opencode/command/*.md`
+format. Both harnesses agentcfg renders are confirmed — directly against
+each one's own discovery code/docs, not assumed — to read the identical
+path:
+
+- **opencode**: its skill loader walks project-local
+  `.agents/skills/*/SKILL.md` (up to the git worktree root) and global
+  `~/.agents/skills/*/SKILL.md`.
+- **omp**: its `agents` skill provider — omp's own docs call
+  `.agent[s]/skills` "the canonical OMP-native location" — reads the
+  identical path at both project and user scope.
+
+Because the discovery path is identical on both harnesses, rendering a
+command needs **no per-harness translation**: `internal/render/opencode`
+and `internal/render/omp` both declare the `custom_commands` capability
+and both call the same shared `render.RenderCommands` helper, which
+produces byte-identical output for either — see
+`internal/render/commands.go`. Removing a command from the registry
+prunes its previously-rendered `SKILL.md` file and directory on the next
+`agentcfg apply`.
+
 ## The `Value` type: literal, env, file, command, format
 
 Several fields (`mcp_servers[].url`, `mcp_servers[].command[]`,
@@ -410,6 +472,12 @@ command (non-zero exit) and anything in "warnings" is printed but doesn't:
   with no `command`
 - a `contexts` entry with neither `match.git_remote_host` nor
   `match.git_remote_owner` set
+- a command with no `name`, a duplicate `name`, or a `name` that violates
+  the Agent Skills naming rule (uppercase, underscore, leading/trailing
+  hyphen, or over 64 characters)
+- a command with no `description`
+- a command whose `prompt` sets neither or both of `file`/`text`, or
+  whose `prompt.file` doesn't exist on disk or escapes the registry root
 
 **Warnings:**
 - an agent that declares `mcp:` servers but doesn't set

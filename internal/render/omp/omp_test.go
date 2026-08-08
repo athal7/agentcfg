@@ -93,8 +93,8 @@ func TestRender_LeadAndBuildProducesFourOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
-	if len(plan.Outputs) != 4 {
-		t.Fatalf("got %d outputs, want 4: %+v", len(plan.Outputs), plan.Outputs)
+	if len(plan.Outputs) != 5 {
+		t.Fatalf("got %d outputs, want 5 (was 4 before the commands RebuildTree): %+v", len(plan.Outputs), plan.Outputs)
 	}
 
 	rebuild := outputByType[render.RebuildDir](t, plan.Outputs)
@@ -300,6 +300,7 @@ func TestCapabilities_OnlyDeclaresWhatIsBuilt(t *testing.T) {
 		render.CapMCPLocalTransport:  true,
 		render.CapMCPRemoteTransport: true,
 		render.CapProjectModelPolicy: true,
+		render.CapCustomCommands:     true,
 	}
 	got := New().Capabilities()
 	if len(got) != len(want) {
@@ -309,6 +310,36 @@ func TestCapabilities_OnlyDeclaresWhatIsBuilt(t *testing.T) {
 		if !want[c] {
 			t.Errorf("unexpected capability declared: %s", c)
 		}
+	}
+}
+
+func TestRender_CommandsRenderAsSkillFiles(t *testing.T) {
+	reg := &registry.Registry{
+		Bash: baseBashPolicy(),
+		Commands: []registry.Command{
+			{Name: "review", Description: "Reviews a diff", Prompt: registry.Prompt{Text: "Review the diff."}},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	if len(plan.Gaps) != 0 {
+		t.Fatalf("got %d gaps, want 0 (omp declares CapCustomCommands): %+v", len(plan.Gaps), plan.Gaps)
+	}
+
+	tree := outputByType[render.RebuildTree](t, plan.Outputs)
+	if tree.Dir != render.CommandsSkillsDir {
+		t.Errorf("got Dir %q, want %q", tree.Dir, render.CommandsSkillsDir)
+	}
+	files, ok := tree.Dirs["review"]
+	if !ok || len(files) != 1 || files[0].Path != "SKILL.md" {
+		t.Fatalf("Dirs[review] = %+v, want exactly one SKILL.md entry", tree.Dirs["review"])
+	}
+	want := "---\nname: review\ndescription: Reviews a diff\n---\nReview the diff."
+	if string(files[0].Content) != want {
+		t.Errorf("Content = %q, want %q", files[0].Content, want)
 	}
 }
 

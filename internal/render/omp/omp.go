@@ -51,6 +51,7 @@ func (renderer) Capabilities() []render.Capability {
 		render.CapMCPLocalTransport,
 		render.CapMCPRemoteTransport,
 		render.CapProjectModelPolicy,
+		render.CapCustomCommands,
 	}
 }
 
@@ -115,6 +116,12 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 			"mcpServers": mcpServers,
 		},
 	})
+
+	commandsTree, err := render.RenderCommands(reg, readFile)
+	if err != nil {
+		return nil, fmt.Errorf("omp: rendering commands: %w", err)
+	}
+	plan.Outputs = append(plan.Outputs, commandsTree)
 
 	return plan, nil
 }

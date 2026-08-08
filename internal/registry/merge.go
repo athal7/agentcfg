@@ -51,6 +51,7 @@ func mergeFileInto(reg *Registry, fc fileContents, path string, isLocal bool, st
 	mergeKey("agents", fc.Agents != nil, func() { reg.Agents = fc.Agents })
 	mergeKey("mcp_servers", fc.MCPServers != nil, func() { reg.MCPServers = fc.MCPServers })
 	mergeKey("contexts", fc.Contexts != nil, func() { reg.Contexts = fc.Contexts })
+	mergeKey("commands", fc.Commands != nil, func() { reg.Commands = fc.Commands })
 
 	if fc.Bash != nil {
 		if isLocal {

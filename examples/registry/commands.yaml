@@ -1,0 +1,5 @@
+commands:
+  - name: review
+    description: "Reviews the current diff for correctness and style"
+    prompt:
+      text: "Review the current diff for correctness, style, and test coverage. Call out anything risky before it merges."

@@ -64,6 +64,8 @@ func outputTypeName(o render.Output) string {
 		return "merge_toml"
 	case render.RebuildDir:
 		return "rebuild_dir"
+	case render.RebuildTree:
+		return "rebuild_tree"
 	case render.RunCommand:
 		return "run_command"
 	default:
@@ -96,6 +98,8 @@ func toJSONOutput(o render.Output) jsonOutput {
 	case render.MergeTOML:
 		jo.Path = v.Path
 	case render.RebuildDir:
+		jo.Path = v.Dir
+	case render.RebuildTree:
 		jo.Path = v.Dir
 	}
 	return jo

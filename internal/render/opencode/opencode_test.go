@@ -69,8 +69,8 @@ func TestRender_LeadAndBuildWithOneMCPServer(t *testing.T) {
 	if len(plan.Gaps) != 0 {
 		t.Fatalf("got %d gaps, want 0: %+v", len(plan.Gaps), plan.Gaps)
 	}
-	if len(plan.Outputs) != 1 {
-		t.Fatalf("got %d outputs, want 1: %+v", len(plan.Outputs), plan.Outputs)
+	if len(plan.Outputs) != 2 {
+		t.Fatalf("got %d outputs, want 2 (config MergeJSON + commands RebuildTree): %+v", len(plan.Outputs), plan.Outputs)
 	}
 
 	out, ok := plan.Outputs[0].(render.MergeJSON)
@@ -364,6 +364,51 @@ func TestCapabilities_DeclaresProjectModelPolicy(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("opencode should declare CapProjectModelPolicy")
+	}
+}
+
+func TestCapabilities_DeclaresCustomCommands(t *testing.T) {
+	found := false
+	for _, c := range New().Capabilities() {
+		if c == render.CapCustomCommands {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("opencode should declare CapCustomCommands")
+	}
+}
+
+func TestRender_CommandsRenderAsSkillFiles(t *testing.T) {
+	reg := &registry.Registry{
+		Bash: baseBashPolicy(),
+		Commands: []registry.Command{
+			{Name: "review", Description: "Reviews a diff", Prompt: registry.Prompt{Text: "Review the diff."}},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	if len(plan.Gaps) != 0 {
+		t.Fatalf("got %d gaps, want 0 (opencode declares CapCustomCommands): %+v", len(plan.Gaps), plan.Gaps)
+	}
+
+	tree, ok := plan.Outputs[1].(render.RebuildTree)
+	if !ok {
+		t.Fatalf("Outputs[1] is %T, want render.RebuildTree", plan.Outputs[1])
+	}
+	if tree.Dir != render.CommandsSkillsDir {
+		t.Errorf("got Dir %q, want %q", tree.Dir, render.CommandsSkillsDir)
+	}
+	files, ok := tree.Dirs["review"]
+	if !ok || len(files) != 1 || files[0].Path != "SKILL.md" {
+		t.Fatalf("Dirs[review] = %+v, want exactly one SKILL.md entry", tree.Dirs["review"])
+	}
+	want := "---\nname: review\ndescription: Reviews a diff\n---\nReview the diff."
+	if string(files[0].Content) != want {
+		t.Errorf("Content = %q, want %q", files[0].Content, want)
 	}
 }
 

@@ -197,6 +197,90 @@ func TestDetectGaps_NoPrimaryAgentNoGap(t *testing.T) {
 	}
 }
 
+func TestDetectGaps_PrimaryAgentToolPermissionDropped(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary", Permissions: registry.Permissions{
+				Edit: "deny", Write: "deny",
+			}},
+			{Name: "build", Mode: "subagent", Permissions: registry.Permissions{
+				Edit: "allow", Write: "allow",
+			}},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	var found *Gap
+	for i := range gaps {
+		if gaps[i].Capability == CapPrimaryAgentToolPermission {
+			found = &gaps[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected a primary_agent_tool_permission gap, got %+v", gaps)
+	}
+	if found.Kind != GapSkip {
+		t.Errorf("got kind %s, want skip", found.Kind)
+	}
+	if found.Subject != "agent:lead.permissions" {
+		t.Errorf("got subject %q, want agent:lead.permissions", found.Subject)
+	}
+}
+
+func TestDetectGaps_PrimaryAgentToolPermissionIgnoresSubagentEditWrite(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary"},
+			{Name: "build", Mode: "subagent", Permissions: registry.Permissions{
+				Edit: "allow", Write: "allow",
+			}},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	for _, g := range gaps {
+		if g.Capability == CapPrimaryAgentToolPermission {
+			t.Fatalf("did not expect primary_agent_tool_permission gap from a subagent's edit/write, got %+v", g)
+		}
+	}
+}
+
+func TestDetectGaps_PrimaryAgentToolPermissionSuppressedWhenDeclared(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary", Permissions: registry.Permissions{
+				Edit: "deny", Write: "deny",
+			}},
+		},
+	}
+
+	gaps := DetectGaps(reg, []Capability{CapPrimaryAgentToolPermission})
+
+	for _, g := range gaps {
+		if g.Capability == CapPrimaryAgentToolPermission {
+			t.Fatalf("did not expect primary_agent_tool_permission gap when declared, got %+v", g)
+		}
+	}
+}
+
+func TestDetectGaps_NoPrimaryAgentEditWriteNoGap(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary"},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	for _, g := range gaps {
+		if g.Capability == CapPrimaryAgentToolPermission {
+			t.Fatalf("did not expect primary_agent_tool_permission gap when primary agent's edit/write are unset, got %+v", g)
+		}
+	}
+}
+
 func TestDetectGaps_ExternalDirectoryDropped(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{

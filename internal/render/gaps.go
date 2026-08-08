@@ -23,6 +23,7 @@ func DetectGaps(reg *registry.Registry, declared []Capability) []Gap {
 	gaps = append(gaps, detectAgentStepsGaps(reg, has)...)
 	gaps = append(gaps, detectPerAgentBashPolicyGap(reg, has)...)
 	gaps = append(gaps, detectPrimaryAgentGap(reg, has)...)
+	gaps = append(gaps, detectPrimaryAgentToolPermissionGap(reg, has)...)
 	gaps = append(gaps, detectExternalDirectoryGaps(reg, has)...)
 	gaps = append(gaps, detectMCPToolGlobsGaps(reg, has)...)
 	gaps = append(gaps, detectAgentTaskPermissionGaps(reg, has)...)
@@ -106,6 +107,41 @@ func detectPrimaryAgentGap(reg *registry.Registry, has map[Capability]bool) []Ga
 		}
 	}
 	return nil
+}
+
+// detectPrimaryAgentToolPermissionGap reports a GapSkip when the renderer
+// doesn't declare CapPrimaryAgentToolPermission and the primary agent sets
+// permissions.edit or permissions.write. Subagents' edit/write permissions
+// are unconditionally expressible via their own per-agent tool list (every
+// renderer that supports CapAgentDefinitions renders it), so this detector
+// only fires for the primary agent: a renderer that expresses it as a
+// whole-session system-prompt append (CapPromptAppend) rather than a
+// first-class per-agent config entry has no surface left to carry a tool
+// restriction onto that session, so the edit/write decision is otherwise
+// dropped silently.
+func detectPrimaryAgentToolPermissionGap(reg *registry.Registry, has map[Capability]bool) []Gap {
+	if has[CapPrimaryAgentToolPermission] {
+		return nil
+	}
+	var gaps []Gap
+	for _, a := range reg.Agents {
+		if a.Mode != "primary" {
+			continue
+		}
+		if a.Permissions.Edit == "" && a.Permissions.Write == "" {
+			continue
+		}
+		gaps = append(gaps, Gap{
+			Kind:       GapSkip,
+			Capability: CapPrimaryAgentToolPermission,
+			Subject:    fmt.Sprintf("agent:%s.permissions", a.Name),
+			Detail: fmt.Sprintf(
+				"agent %q is the primary agent and sets permissions.edit=%q/permissions.write=%q; this harness has no per-agent tool-permission surface for the primary session (only subagents get one), so the restriction is dropped and the primary session keeps full edit/write access.",
+				a.Name, a.Permissions.Edit, a.Permissions.Write,
+			),
+		})
+	}
+	return gaps
 }
 
 // detectExternalDirectoryGaps reports a GapSkip for every agent that sets

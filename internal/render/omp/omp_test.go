@@ -214,6 +214,53 @@ func TestRender_GapsForUndeclaredCapabilities(t *testing.T) {
 	}
 }
 
+// TestRender_PrimaryAgentEditWriteGap covers issue #9: a primary agent
+// setting permissions.edit/write (e.g. to force delegation of file changes
+// to subagents, as opencode's agent.permission block does) has nowhere to
+// go in omp's rendered output — the primary agent gets only a
+// system-prompt append, never a per-agent tools: list — so the decision
+// must surface as a primary_agent_tool_permission gap instead of being
+// silently dropped.
+func TestRender_PrimaryAgentEditWriteGap(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{
+				Name:   "lead",
+				Mode:   "primary",
+				Class:  "default",
+				Prompt: registry.Prompt{Text: "You are lead."},
+				Permissions: registry.Permissions{
+					Edit:  "deny",
+					Write: "deny",
+				},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	var found *render.Gap
+	for i := range plan.Gaps {
+		if plan.Gaps[i].Capability == render.CapPrimaryAgentToolPermission {
+			found = &plan.Gaps[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected a primary_agent_tool_permission gap, got %+v", plan.Gaps)
+	}
+	if found.Kind != render.GapSkip {
+		t.Errorf("got kind %s, want skip", found.Kind)
+	}
+	if found.Subject != "agent:lead.permissions" {
+		t.Errorf("got subject %q, want agent:lead.permissions", found.Subject)
+	}
+}
+
 // TestRender_UnresolvableMCPServerSkippedWithGap covers a resolver failure
 // for a local-transport server (a Value backed by a failing command).
 func TestRender_UnresolvableMCPServerSkippedWithGap(t *testing.T) {

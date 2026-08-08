@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/athal7/agentcfg/internal/registry"
@@ -113,12 +114,17 @@ func promptText(p registry.Prompt, resolvedFile string, readFile func(string) ([
 // description — name must match the containing directory, which is
 // c.Name, satisfied by RenderCommands using c.Name as the Dirs key too),
 // followed by "---" and the raw prompt body as the skill's markdown
-// instructions.
+// instructions. Description is quoted (strconv.Quote produces a
+// double-quoted scalar YAML accepts unchanged) since it's arbitrary
+// author-provided text that may contain "`: `", "#", or a newline — any
+// of which would corrupt the frontmatter or inject an unintended field
+// if written unquoted. Name never needs this: isValidCommandName already
+// restricts it to lowercase letters, digits, and hyphens.
 func renderSkillFile(c registry.Command, body string) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "name: %s\n", c.Name)
-	fmt.Fprintf(&b, "description: %s\n", c.Description)
+	fmt.Fprintf(&b, "description: %s\n", strconv.Quote(c.Description))
 	b.WriteString("---\n")
 	b.WriteString(body)
 	return b.String()

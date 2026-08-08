@@ -79,6 +79,13 @@ func TestApplyRebuildTree_PrunesSubdirectoryNoLongerListed(t *testing.T) {
 	}
 }
 
+// TestApplyRebuildTree_EmptyDirsPrunesEverything covers the "command
+// removed from the registry entirely" case: every subdirectory this
+// package itself rendered on the prior apply is pruned. The manifest
+// file (rebuildTreeManifestFile) is expected to remain — it's agentcfg's
+// own bookkeeping, not a rendered command, and lives at dir's top level
+// as a plain file, never a subdirectory a harness's skill discovery
+// would ever walk into.
 func TestApplyRebuildTree_EmptyDirsPrunesEverything(t *testing.T) {
 	dir := t.TempDir()
 
@@ -97,8 +104,45 @@ func TestApplyRebuildTree_EmptyDirsPrunesEverything(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
 	}
-	if len(entries) != 0 {
-		t.Errorf("got %d leftover entries, want 0: %v", len(entries), entries)
+	if len(entries) != 1 || entries[0].Name() != rebuildTreeManifestFile || entries[0].IsDir() {
+		t.Errorf("got entries %v, want exactly the manifest file %q", entries, rebuildTreeManifestFile)
+	}
+}
+
+// TestApplyRebuildTree_NeverPrunesADirectoryItNeverManaged covers the
+// CodeRabbit finding on PR #27: RebuildTree.Dir is a harness-shared
+// discovery path (Agent Skills' "~/.agents/skills"), not an
+// agentcfg-exclusive directory. A subdirectory that predates agentcfg
+// ever running there (no manifest entry for it) must survive every
+// apply indefinitely, even across many runs, even if its name never
+// appears in any registry — agentcfg only ever prunes what it can prove,
+// via the manifest, that it created itself.
+func TestApplyRebuildTree_NeverPrunesADirectoryItNeverManaged(t *testing.T) {
+	dir := t.TempDir()
+
+	unrelated := filepath.Join(dir, "local-skill")
+	if err := os.MkdirAll(unrelated, 0o755); err != nil {
+		t.Fatalf("seeding local-skill/: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(unrelated, "SKILL.md"), []byte("hand-authored"), 0o644); err != nil {
+		t.Fatalf("seeding local-skill/SKILL.md: %v", err)
+	}
+
+	for i := range 2 {
+		if _, _, err := applyRebuildTree(render.RebuildTree{
+			Dir:  dir,
+			Dirs: map[string][]render.WriteFile{"review": {{Path: "SKILL.md", Content: []byte("x")}}},
+		}); err != nil {
+			t.Fatalf("applyRebuildTree run %d returned error: %v", i, err)
+		}
+	}
+
+	got, err := os.ReadFile(filepath.Join(unrelated, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("expected local-skill/SKILL.md to survive, stat/read err = %v", err)
+	}
+	if string(got) != "hand-authored" {
+		t.Errorf("local-skill/SKILL.md content = %q, want untouched %q", got, "hand-authored")
 	}
 }
 

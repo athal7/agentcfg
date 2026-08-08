@@ -6,11 +6,13 @@
 package apply
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/athal7/agentcfg/internal/render"
@@ -269,15 +271,69 @@ func applyRebuildDir(r render.RebuildDir) (applied, skipped string, err error) {
 	return fmt.Sprintf("rebuilt %s (%d files)", dir, len(r.Files)), "", nil
 }
 
+// rebuildTreeManifestFile is a dotfile agentcfg writes inside every
+// RebuildTree.Dir, listing the subdirectory names it rendered on the
+// last apply. RebuildTree targets a harness-shared discovery path (e.g.
+// Agent Skills' "~/.agents/skills" — see CommandsSkillsDir), not an
+// agentcfg-exclusive one like RebuildDir's typical targets: a user or
+// another tool may have their own, unrelated subdirectories there.
+// Without this manifest, pruning "every subdirectory not in the current
+// registry" would delete anything agentcfg didn't happen to render this
+// run, including content it never created. The manifest scopes pruning
+// to exactly what agentcfg itself previously wrote: a subdirectory is
+// only ever removed if it's absent from the current render AND present
+// in the manifest from the last apply. A directory that was never
+// agentcfg-managed is never touched, no matter its name.
+const rebuildTreeManifestFile = ".agentcfg-managed.json"
+
+// readRebuildTreeManifest returns the subdirectory names dir's manifest
+// recorded as agentcfg-managed on the last apply. A missing or corrupt
+// manifest (first-ever apply, or a directory that predates this
+// mechanism) returns an empty set — first-run behavior is to touch
+// nothing but what's freshly written, never to guess at prior state.
+func readRebuildTreeManifest(dir string) map[string]bool {
+	data, err := os.ReadFile(filepath.Join(dir, rebuildTreeManifestFile))
+	if err != nil {
+		return nil
+	}
+	var names []string
+	if err := json.Unmarshal(data, &names); err != nil {
+		return nil
+	}
+	managed := make(map[string]bool, len(names))
+	for _, n := range names {
+		managed[n] = true
+	}
+	return managed
+}
+
+// writeRebuildTreeManifest persists the subdirectory names this apply
+// rendered, so the next apply knows what it's safe to prune.
+func writeRebuildTreeManifest(dir string, dirs map[string][]render.WriteFile) error {
+	names := make([]string, 0, len(dirs))
+	for name := range dirs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	data, err := json.Marshal(names)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, rebuildTreeManifestFile), data, 0o600)
+}
+
 // applyRebuildTree writes every entry in r.Dirs into its own subdirectory
-// of r.Dir first, then removes any immediate subdirectory of r.Dir not
-// named in r.Dirs at all — as one unit, so a write failure never leaves
-// stale subdirectories behind. Unlike applyRebuildDir's basename-keyed
-// pruning, this matches by subdirectory name, so entries whose files
-// share an identical basename (every Agent Skill's SKILL.md) don't
-// collide. Not git-guarded, for the same reason RebuildDir isn't: this
-// only ever targets a renderer-owned directory (see RebuildTree's doc
-// comment in internal/render/renderer.go).
+// of r.Dir first, then removes any immediate subdirectory of r.Dir that
+// was agentcfg-managed on the last apply (per the manifest) but isn't
+// named in r.Dirs now — as one unit, so a write failure never leaves
+// stale subdirectories behind, and pruning never touches a subdirectory
+// agentcfg didn't itself create (see rebuildTreeManifestFile). Unlike
+// applyRebuildDir's basename-keyed pruning, this matches by subdirectory
+// name, so entries whose files share an identical basename (every Agent
+// Skill's SKILL.md) don't collide. Not git-guarded, for the same reason
+// RebuildDir isn't: this only ever removes subdirectories the manifest
+// proves are renderer-owned (see RebuildTree's doc comment in
+// internal/render/renderer.go).
 func applyRebuildTree(r render.RebuildTree) (applied, skipped string, err error) {
 	dir, err := expandPath(r.Dir)
 	if err != nil {
@@ -286,6 +342,8 @@ func applyRebuildTree(r render.RebuildTree) (applied, skipped string, err error)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", "", fmt.Errorf("creating directory %s: %w", dir, err)
 	}
+
+	previouslyManaged := readRebuildTreeManifest(dir)
 
 	// Write every replacement subdirectory's files first. If any write
 	// fails, no stale subdirectory has been removed yet.
@@ -298,7 +356,10 @@ func applyRebuildTree(r render.RebuildTree) (applied, skipped string, err error)
 		}
 	}
 
-	// Now remove every immediate subdirectory of dir that isn't in r.Dirs.
+	// Now remove only the immediate subdirectories of dir that this
+	// renderer managed last time but no longer wants — never a
+	// subdirectory absent from the manifest, which agentcfg never
+	// created and so must not delete.
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", "", fmt.Errorf("reading directory %s: %w", dir, err)
@@ -310,9 +371,16 @@ func applyRebuildTree(r render.RebuildTree) (applied, skipped string, err error)
 		if _, ok := r.Dirs[e.Name()]; ok {
 			continue
 		}
+		if !previouslyManaged[e.Name()] {
+			continue
+		}
 		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
 			return "", "", fmt.Errorf("removing stale directory %s: %w", e.Name(), err)
 		}
+	}
+
+	if err := writeRebuildTreeManifest(dir, r.Dirs); err != nil {
+		return "", "", fmt.Errorf("writing manifest for %s: %w", dir, err)
 	}
 
 	return fmt.Sprintf("rebuilt %s (%d subdirectories)", dir, len(r.Dirs)), "", nil

@@ -276,8 +276,12 @@ func validatePromptField(p Prompt, subject, rootDir, rootReal string) []Validati
 		if violates {
 			return []ValidationError{{Message: fmt.Sprintf("prompt file escapes registry root: %s", p.File)}}
 		}
-		if _, err := os.Stat(resolved); err != nil {
+		info, err := os.Stat(resolved)
+		if err != nil {
 			return []ValidationError{{Message: fmt.Sprintf("referenced prompt file does not exist: %s", resolved)}}
+		}
+		if !info.Mode().IsRegular() {
+			return []ValidationError{{Message: fmt.Sprintf("referenced prompt path is not a regular file: %s", resolved)}}
 		}
 	}
 	return nil

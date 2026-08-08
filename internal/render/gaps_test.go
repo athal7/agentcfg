@@ -815,6 +815,35 @@ func TestDetectGaps_CustomCommandsDropped(t *testing.T) {
 	}
 }
 
+// TestDetectGaps_StructuredWorkflowNotReportedWhenCommandAlreadyDropped
+// covers the CodeRabbit finding on PR #27: a renderer lacking even
+// CapCustomCommands drops a stepped command entirely (GapSkip) — it
+// can't also "behave as flattened prose" there, so no
+// structured_workflow_command reduction should additionally fire.
+func TestDetectGaps_StructuredWorkflowNotReportedWhenCommandAlreadyDropped(t *testing.T) {
+	reg := &registry.Registry{
+		Commands: []registry.Command{
+			{
+				Name:        "ship",
+				Description: "Plan, build, and ship a change",
+				Steps: []registry.CommandStep{
+					{Name: "plan"},
+					{Name: "build"},
+				},
+			},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	if len(gaps) != 1 {
+		t.Fatalf("got %d gaps, want 1 (custom_commands skip only): %+v", len(gaps), gaps)
+	}
+	if gaps[0].Capability != CapCustomCommands || gaps[0].Kind != GapSkip {
+		t.Errorf("got gap %+v, want a custom_commands skip", gaps[0])
+	}
+}
+
 func TestDetectGaps_CustomCommandsSuppressedWhenDeclared(t *testing.T) {
 	reg := &registry.Registry{
 		Commands: []registry.Command{

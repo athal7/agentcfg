@@ -241,8 +241,13 @@ func (r RebuildDir) Describe() string {
 
 // RebuildTree replaces the immediate subdirectories of Dir with exactly
 // the entries in Dirs (subdirectory name -> files, each WriteFile's Path
-// relative to that subdirectory): a pre-existing immediate subdirectory
-// of Dir not named in Dirs is removed in full (recursively).
+// relative to that subdirectory): a subdirectory of Dir agentcfg itself
+// rendered on a previous apply, but that's absent from Dirs now, is
+// removed in full (recursively) — see internal/apply's
+// rebuildTreeManifestFile for how apply distinguishes "agentcfg rendered
+// this, and no longer wants it" from "something else lives here," since
+// Dir is typically a harness-shared discovery path (e.g. Agent Skills'
+// "~/.agents/skills"), not an agentcfg-exclusive directory.
 //
 // Unlike RebuildDir, which prunes stale files by matching Glob results
 // against each kept file's *basename* (correct when every kept file's

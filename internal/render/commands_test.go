@@ -44,7 +44,7 @@ func TestRenderCommands_InlineText(t *testing.T) {
 	if f.Path != "SKILL.md" {
 		t.Errorf("Path = %q, want SKILL.md", f.Path)
 	}
-	want := "---\nname: review\ndescription: Reviews a diff\n---\nReview the diff."
+	want := "---\nname: review\ndescription: \"Reviews a diff\"\n---\nReview the diff."
 	if string(f.Content) != want {
 		t.Errorf("Content = %q, want %q", f.Content, want)
 	}
@@ -69,7 +69,7 @@ func TestRenderCommands_FileBackedPrompt(t *testing.T) {
 		t.Fatalf("RenderCommands() error = %v", err)
 	}
 
-	want := "---\nname: review\ndescription: Reviews a diff\n---\nReview the diff for correctness."
+	want := "---\nname: review\ndescription: \"Reviews a diff\"\n---\nReview the diff for correctness."
 	if string(tree.Dirs["review"][0].Content) != want {
 		t.Errorf("Content = %q, want %q", tree.Dirs["review"][0].Content, want)
 	}
@@ -134,7 +134,7 @@ func TestRenderCommands_MultiStepAlwaysIncludesWorkflowzDirective(t *testing.T) 
 		t.Fatalf("RenderCommands() error = %v", err)
 	}
 
-	want := "---\nname: ship\ndescription: Plan, build, and ship a change\n---\n" +
+	want := "---\nname: ship\ndescription: \"Plan, build, and ship a change\"\n---\n" +
 		"Use `workflowz` to run the following phases as a deterministic pipeline via the persistent eval kernel's `agent()`/`parallel()`/`pipeline()` helpers, each phase's output feeding the next.\n\n" +
 		"## 1. plan\n\nDesign an approach.\n\n## 2. build\n\nImplement it."
 	got := string(tree.Dirs["ship"][0].Content)

@@ -542,7 +542,7 @@ func TestRender_CommandsRenderAsSkillFiles(t *testing.T) {
 	if !ok || len(files) != 1 || files[0].Path != "SKILL.md" {
 		t.Fatalf("Dirs[review] = %+v, want exactly one SKILL.md entry", tree.Dirs["review"])
 	}
-	want := "---\nname: review\ndescription: Reviews a diff\n---\nReview the diff."
+	want := "---\nname: review\ndescription: \"Reviews a diff\"\n---\nReview the diff."
 	if string(files[0].Content) != want {
 		t.Errorf("Content = %q, want %q", files[0].Content, want)
 	}

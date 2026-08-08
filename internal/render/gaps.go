@@ -319,15 +319,20 @@ func detectCustomCommandsGap(reg *registry.Registry, has map[Capability]bool) []
 }
 
 // detectStructuredWorkflowCommandGaps reports a GapReduction for every
-// multi-step command (len(Steps) > 0) when the renderer doesn't declare
-// CapStructuredWorkflowCommand. Informational only — RenderCommands
-// writes identical content regardless of which renderer is asking (see
-// its doc comment), so nothing is actually dropped or altered here; this
-// just surfaces that the current renderer's harness won't interpret the
-// rendered workflowz trigger, so the command behaves as flattened,
-// numbered prose there instead of a deterministic multi-phase pipeline.
+// multi-step command (len(Steps) > 0) when the renderer declares
+// CapCustomCommands but not CapStructuredWorkflowCommand. Requiring
+// CapCustomCommands first matters: a renderer lacking even that drops
+// the command entirely (see detectCustomCommandsGap's GapSkip) — it
+// can't also "behave as flattened prose," so reporting both would be
+// contradictory. When CapCustomCommands IS declared, this is
+// informational only: RenderCommands writes identical content
+// regardless of which renderer is asking (see its doc comment), so
+// nothing is actually dropped or altered here; this just surfaces that
+// the current renderer's harness won't interpret the rendered workflowz
+// trigger, so the command behaves as flattened, numbered prose there
+// instead of a deterministic multi-phase pipeline.
 func detectStructuredWorkflowCommandGaps(reg *registry.Registry, has map[Capability]bool) []Gap {
-	if has[CapStructuredWorkflowCommand] {
+	if !has[CapCustomCommands] || has[CapStructuredWorkflowCommand] {
 		return nil
 	}
 	var gaps []Gap

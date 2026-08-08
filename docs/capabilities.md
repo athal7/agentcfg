@@ -43,7 +43,5 @@ omp  skip  agent_task_permission  agent:lead.permissions.task
     agent "lead" sets permissions.task="allow"; this harness has no task-dispatch permission control, so subagent dispatch is always allowed.
 omp  skip  agent_task_permission  agent:build.permissions.task
     agent "build" sets permissions.task="deny"; this harness has no task-dispatch permission control, so subagent dispatch is always allowed.
-omp  skip  agent_task_permission  agent:plan.permissions.task
-    agent "plan" sets permissions.task="deny"; this harness has no task-dispatch permission control, so subagent dispatch is always allowed.
 omp  skip  mcp_per_tool_ask  agent:build.mcp:context7
     agent "build"'s mcp server "context7" sets per-tool ask patterns [resolve-library-id]; this harness has no per-tool ask-listing, so tools are either fully allowed or fully blocked at the server level.

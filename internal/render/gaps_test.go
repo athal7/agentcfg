@@ -736,6 +736,40 @@ func TestDetectGaps_ComposedAwaySuppressesPerAgentDispatchGaps(t *testing.T) {
 	}
 }
 
+// TestDetectGaps_AdvisoryWithoutPrimaryDoesNotSuppressGaps covers a
+// registry with no role: primary agent: an advisory agent has nothing to
+// compose into, so it falls back to a normal standalone file (see
+// omp_test.go's TestRender_AdvisoryWithoutPrimaryFallsBackToStandaloneFile)
+// and every per-agent dispatch gap that would otherwise be suppressed for
+// a genuinely composed-away agent must still fire.
+func TestDetectGaps_AdvisoryWithoutPrimaryDoesNotSuppressGaps(t *testing.T) {
+	steps := 5
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{
+				Name:  "plan",
+				Role:  "advisory",
+				Steps: &steps,
+				Permissions: registry.Permissions{
+					Task: "deny",
+				},
+			},
+		},
+	}
+
+	gaps := DetectGaps(reg, []Capability{CapComposeIntoPrimary})
+
+	var found bool
+	for _, g := range gaps {
+		if g.Capability == CapAgentSteps && g.Subject == "agent:plan.steps" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected an agent_steps gap for orphaned advisory agent %q, got %+v", "plan", gaps)
+	}
+}
+
 // TestDetectGaps_ComposeFlagSetButRendererDoesNotSupportItStillGaps
 // covers the opencode-shaped side: when the renderer does NOT declare
 // CapComposeIntoPrimary, the agent renders as a normal standalone agent

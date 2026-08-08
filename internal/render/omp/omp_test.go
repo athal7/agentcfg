@@ -579,6 +579,38 @@ func TestRender_ComposeIntoPrimaryRespectsTargetsExclusion(t *testing.T) {
 	}
 }
 
+// TestRender_AdvisoryWithoutPrimaryFallsBackToStandaloneFile covers a
+// registry with no role: primary agent at all: an advisory agent has
+// nothing to compose into, so it must render as a normal standalone
+// file instead of being silently dropped (it must not disappear from
+// both the standalone directory and the — nonexistent — composed
+// prompt).
+func TestRender_AdvisoryWithoutPrimaryFallsBackToStandaloneFile(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{Name: "plan", Role: "advisory", Class: "default", Prompt: registry.Prompt{Text: "Research before coding."}},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	rebuild := outputByType[render.RebuildDir](t, plan.Outputs)
+	if len(rebuild.Files) != 1 || rebuild.Files[0].Path != "plan.md" {
+		t.Fatalf("got files %+v, want exactly one plan.md standalone file", rebuild.Files)
+	}
+
+	for _, o := range plan.Outputs {
+		if wf, ok := o.(render.WriteFile); ok && wf.Path == appendSystemPath {
+			t.Errorf("got an APPEND_SYSTEM.md output %+v, want none (no primary agent to append to)", wf)
+		}
+	}
+}
+
 func TestCapabilities_OnlyDeclaresWhatIsBuilt(t *testing.T) {
 	want := map[render.Capability]bool{
 		render.CapAgentDefinitions:   true,

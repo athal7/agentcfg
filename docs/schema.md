@@ -247,8 +247,10 @@ A registry describes exactly one workflow: a single ordered pipeline of
 steps (v1 supports linear ordering only — declaration order is the only
 ordering signal; DAG-shaped branching is deferred to a future schema
 version). Each entry under `workflow.steps` is an `Agent` — a step's
-authoring unit, named for what it compiles to on each harness, not for
-the discipline it declares:
+authoring unit. A step's `name` is its own stable identifier (used
+verbatim in rendered output, e.g. the omp agent filename); it carries no
+harness-compilation meaning by itself. `role` is the field that selects
+the target-specific compilation mechanism — see [Role](#role) below:
 
 | field | yaml tag | type | notes |
 |---|---|---|---|

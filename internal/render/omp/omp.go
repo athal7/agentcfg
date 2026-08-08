@@ -186,15 +186,23 @@ func (r renderer) RenderProject(classes map[string]string, _ *registry.Registry,
 	}, nil
 }
 
-// renderAgentFiles builds one WriteFile per role: delegate agent targeting
-// omp. role: primary is the session itself (no file); role: advisory is
-// spliced into the primary's APPEND_SYSTEM.md instead (see
-// composedSections). Paths are relative to agentsDir, per RebuildDir's
-// documented convention.
+// renderAgentFiles builds one WriteFile per omp-targeting agent that isn't
+// rendered some other way: role: primary is the session itself (no
+// file); role: advisory is spliced into the primary's APPEND_SYSTEM.md
+// instead (see composedSections) — but only when the registry actually
+// has a role: primary agent to compose into. An advisory agent in a
+// primary-less registry has nothing to splice into, so it falls back to
+// a normal standalone file here rather than being silently dropped.
+// Paths are relative to agentsDir, per RebuildDir's documented
+// convention.
 func renderAgentFiles(reg *registry.Registry, readFile func(string) ([]byte, error)) ([]render.WriteFile, error) {
+	hasPrimary := render.PrimaryAgent(reg) != nil
 	var files []render.WriteFile
 	for _, a := range reg.Agents {
-		if a.Role != "delegate" || !targets(a.Targets) {
+		if !targets(a.Targets) {
+			continue
+		}
+		if a.Role == "primary" || (a.Role == "advisory" && hasPrimary) {
 			continue
 		}
 		body, err := promptBody(a, readFile)

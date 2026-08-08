@@ -33,16 +33,17 @@ func DetectGaps(reg *registry.Registry, declared []Capability) []Gap {
 }
 
 // composedAway reports whether agent a is invisible as a standalone,
-// independently dispatchable agent on a renderer declaring has — spliced
-// into the primary's own prompt instead (see CapComposeIntoPrimary). Every
-// per-agent gap detector below that's specifically about the agent's own
-// standalone execution (step budget, its own bash/task/MCP permissions)
-// must skip a composed-away agent: none of those constraints apply to
-// prose appended into another agent's prompt, and reporting them would
-// misleadingly imply the agent is independently dispatchable on this
-// renderer when it isn't.
-func composedAway(a registry.Agent, has map[Capability]bool) bool {
-	return a.Role == "advisory" && has[CapComposeIntoPrimary]
+// independently dispatchable agent because a renderer with
+// CapComposeIntoPrimary spliced it into the primary's own prompt instead.
+// This only actually happens when the registry has a role: primary agent
+// to compose into (renderAgentFiles/composedSections fall back to
+// rendering an orphaned advisory agent as a normal standalone file
+// otherwise) — every per-agent gap detector below that's specifically
+// about the agent's own standalone execution must agree with that
+// fallback, or it would wrongly suppress gaps for an agent that's
+// actually still being rendered as a file.
+func composedAway(reg *registry.Registry, a registry.Agent, has map[Capability]bool) bool {
+	return a.Role == "advisory" && has[CapComposeIntoPrimary] && PrimaryAgent(reg) != nil
 }
 
 // detectAgentStepsGaps reports a GapSkip for every agent that sets steps:
@@ -53,7 +54,7 @@ func detectAgentStepsGaps(reg *registry.Registry, has map[Capability]bool) []Gap
 	}
 	var gaps []Gap
 	for _, a := range reg.Agents {
-		if a.Steps == nil || composedAway(a, has) {
+		if a.Steps == nil || composedAway(reg, a, has) {
 			continue
 		}
 		gaps = append(gaps, Gap{
@@ -85,7 +86,7 @@ func detectPerAgentBashPolicyGap(reg *registry.Registry, has map[Capability]bool
 	}
 	var names []string
 	for _, a := range reg.Agents {
-		if isPerAgentBashProfile(a.Permissions.Bash) && !composedAway(a, has) {
+		if isPerAgentBashProfile(a.Permissions.Bash) && !composedAway(reg, a, has) {
 			names = append(names, a.Name)
 		}
 	}
@@ -167,7 +168,7 @@ func detectExternalDirectoryGaps(reg *registry.Registry, has map[Capability]bool
 	}
 	var gaps []Gap
 	for _, a := range reg.Agents {
-		if len(a.Permissions.ExternalDirectory) == 0 || composedAway(a, has) {
+		if len(a.Permissions.ExternalDirectory) == 0 || composedAway(reg, a, has) {
 			continue
 		}
 		gaps = append(gaps, Gap{
@@ -215,7 +216,7 @@ func detectAgentTaskPermissionGaps(reg *registry.Registry, has map[Capability]bo
 	}
 	var gaps []Gap
 	for _, a := range reg.Agents {
-		if a.Permissions.Task == "" || composedAway(a, has) {
+		if a.Permissions.Task == "" || composedAway(reg, a, has) {
 			continue
 		}
 		gaps = append(gaps, Gap{
@@ -240,7 +241,7 @@ func detectMCPPerToolAskGaps(reg *registry.Registry, has map[Capability]bool) []
 	}
 	var gaps []Gap
 	for _, a := range reg.Agents {
-		if composedAway(a, has) {
+		if composedAway(reg, a, has) {
 			continue
 		}
 		for _, m := range a.MCP {

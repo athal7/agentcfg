@@ -262,6 +262,44 @@ func TestRender_NoPrimaryAgentOmitsDefaultAgent(t *testing.T) {
 	}
 }
 
+// TestRender_PrimaryAgentEditWriteNoGap covers issue #9's opencode side of
+// the comparison: unlike omp, opencode's default_agent still gets a full
+// agent.<name>.permission block (renderAgent applies to every agent
+// uniformly), so a primary agent's permissions.edit/write is fully
+// expressed and must never gap.
+func TestRender_PrimaryAgentEditWriteNoGap(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{
+				Name:   "lead",
+				Mode:   "primary",
+				Class:  "default",
+				Prompt: registry.Prompt{Text: "You are lead."},
+				Permissions: registry.Permissions{
+					Edit:  "deny",
+					Write: "deny",
+				},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	if len(plan.Gaps) != 0 {
+		t.Fatalf("got %d gaps, want 0 (opencode declares primary_agent_tool_permission): %+v", len(plan.Gaps), plan.Gaps)
+	}
+
+	out := plan.Outputs[0].(render.MergeJSON)
+	leadPerm := out.Object["agent"].(map[string]any)["lead"].(map[string]any)["permission"].(map[string]any)
+	if leadPerm["edit"] != "deny" || leadPerm["write"] != "deny" {
+		t.Errorf("got lead permission %#v, want edit=deny write=deny", leadPerm)
+	}
+}
+
 func TestCapabilities_ExcludesUndeclaredOnes(t *testing.T) {
 	excluded := map[render.Capability]bool{
 		render.CapBashOrderedList:   true,

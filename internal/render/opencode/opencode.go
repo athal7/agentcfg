@@ -32,11 +32,17 @@ type renderer struct{}
 func (renderer) ID() string { return id }
 
 // Capabilities returns the set of registry features this renderer can
-// express in opencode's native config.
+// express in opencode's native config. CapPrimaryAgentToolPermission is
+// included because renderAgent (below) applies permissions.edit/write to
+// every agent uniformly, including the primary one — opencode's
+// default_agent key still gets a full agent.<name>.permission block, unlike
+// omp's primary agent, which only gets a system-prompt append with no
+// permission surface at all.
 func (renderer) Capabilities() []render.Capability {
 	return []render.Capability{
 		render.CapAgentDefinitions,
 		render.CapPrimaryAgent,
+		render.CapPrimaryAgentToolPermission,
 		render.CapPromptFileRef,
 		render.CapAgentSteps,
 		render.CapAgentTaskPermission,

@@ -629,3 +629,141 @@ func TestDetectGaps_MCPToolGlobsAndPerToolAskCombineIndependently(t *testing.T) 
 		t.Fatalf("expected mcp_tool_globs gap to survive declaring only mcp_per_tool_ask, got %+v", gapsAskDeclared)
 	}
 }
+
+func TestDetectGaps_ComposeIntoPrimaryReductionWhenUndeclared(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary"},
+			{Name: "plan", Mode: "subagent", ComposeIntoPrimary: true},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	var found *Gap
+	for i := range gaps {
+		if gaps[i].Capability == CapComposeIntoPrimary {
+			found = &gaps[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected a compose_into_primary gap, got %+v", gaps)
+	}
+	if found.Kind != GapReduction {
+		t.Errorf("got kind %s, want reduction (content survives as a standalone agent)", found.Kind)
+	}
+	if found.Subject != "agent:plan" {
+		t.Errorf("got subject %q, want agent:plan", found.Subject)
+	}
+}
+
+func TestDetectGaps_ComposeIntoPrimarySuppressedWhenDeclared(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary"},
+			{Name: "plan", Mode: "subagent", ComposeIntoPrimary: true},
+		},
+	}
+
+	gaps := DetectGaps(reg, []Capability{CapComposeIntoPrimary})
+
+	for _, g := range gaps {
+		if g.Capability == CapComposeIntoPrimary {
+			t.Fatalf("did not expect compose_into_primary gap when declared, got %+v", g)
+		}
+	}
+}
+
+func TestDetectGaps_NoComposeIntoPrimaryNoGap(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary"},
+			{Name: "plan", Mode: "subagent"},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	for _, g := range gaps {
+		if g.Capability == CapComposeIntoPrimary {
+			t.Fatalf("did not expect compose_into_primary gap when unset, got %+v", g)
+		}
+	}
+}
+
+// TestDetectGaps_ComposedAwaySuppressesPerAgentDispatchGaps covers the
+// CodeRabbit finding on PR #23: an agent composed into the primary on a
+// renderer that declares CapComposeIntoPrimary is never rendered as a
+// standalone, independently dispatchable agent there, so per-agent gaps
+// that specifically describe standalone-dispatch behavior (steps,
+// per-agent bash profile, external_directory, task permission,
+// per-tool MCP ask) must not fire for it — they'd misleadingly imply the
+// agent is dispatchable when it isn't.
+func TestDetectGaps_ComposedAwaySuppressesPerAgentDispatchGaps(t *testing.T) {
+	steps := 5
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary"},
+			{
+				Name:               "plan",
+				Mode:               "subagent",
+				ComposeIntoPrimary: true,
+				Steps:              &steps,
+				Permissions: registry.Permissions{
+					Task:              "deny",
+					Bash:              registry.BashPermission{Profile: "readonly"},
+					ExternalDirectory: map[string]registry.Decision{"*": registry.Ask},
+				},
+				MCP: []registry.AgentMCP{{Server: "github", Ask: []string{"create_*"}}},
+			},
+		},
+	}
+
+	gaps := DetectGaps(reg, []Capability{CapComposeIntoPrimary})
+
+	suppressed := []Capability{
+		CapAgentSteps,
+		CapPerAgentBashPolicy,
+		CapExternalDirectory,
+		CapAgentTaskPermission,
+		CapMCPPerToolAsk,
+	}
+	for _, cap := range suppressed {
+		for _, g := range gaps {
+			if g.Capability == cap {
+				t.Errorf("did not expect a %s gap for a composed-away agent, got %+v", cap, g)
+			}
+		}
+	}
+}
+
+// TestDetectGaps_ComposeFlagSetButRendererDoesNotSupportItStillGaps
+// covers the opencode-shaped side: when the renderer does NOT declare
+// CapComposeIntoPrimary, the agent renders as a normal standalone agent
+// there (per docs/schema.md), so its per-agent gaps must fire exactly as
+// they would with the flag unset.
+func TestDetectGaps_ComposeFlagSetButRendererDoesNotSupportItStillGaps(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary"},
+			{
+				Name:               "plan",
+				Mode:               "subagent",
+				ComposeIntoPrimary: true,
+				Permissions:        registry.Permissions{Task: "deny"},
+			},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	var found bool
+	for _, g := range gaps {
+		if g.Capability == CapAgentTaskPermission && g.Subject == "agent:plan.permissions.task" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected an agent_task_permission gap for agent:plan on a renderer without CapComposeIntoPrimary, got %+v", gaps)
+	}
+}

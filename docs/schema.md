@@ -255,6 +255,7 @@ Each entry is an `Agent`:
 | `Steps` | `steps` | `*int` | optional step budget; only some renderers can express this (see `docs/capabilities.md`) |
 | `Permissions` | `permissions` | object | see below |
 | `MCP` | `mcp` | `[]AgentMCP` | which MCP servers this agent may use |
+| `ComposeIntoPrimary` | `compose_into_primary` | bool | defaults to `false`; see [`compose_into_primary`](#compose_into_primary) below |
 
 `Prompt`:
 
@@ -286,6 +287,35 @@ Each entry is an `Agent`:
 |---|---|---|
 | `Server` | `server` | string — must name an entry in `mcp_servers` |
 | `Ask` | `ask` | `[]string` — tool-name/glob patterns this agent must be asked about before use |
+
+### `compose_into_primary`
+
+```yaml
+agents:
+  - name: plan
+    description: "Architects changes before implementation"
+    mode: subagent
+    class: default
+    compose_into_primary: true
+    prompt:
+      text: "You research and design an approach; you do not write or edit files yourself."
+```
+
+`compose_into_primary: true` tells a renderer that supports it (declares
+the `compose_into_primary` capability — see `docs/capabilities.md`) to
+splice this agent's prompt content into the primary agent's own
+whole-session prompt output instead of emitting a standalone,
+independently dispatchable agent file for it. Multiple composing agents
+are appended after the primary's own prompt, each under its own labeled
+section, in the order they're declared in the registry. A renderer that
+doesn't support it (opencode) ignores the field entirely and renders the
+agent exactly as if it were unset — a normal standalone subagent.
+
+This is meant for agents whose role is discipline the primary should
+apply when it works directly or dispatches a `task` (a build/implementer
+or plan/architect persona) rather than a specialized, independently
+dispatchable tool (research, browser QA, etc.) — the latter should stay a
+plain standalone agent.
 
 ## `mcp_servers:`
 
@@ -397,6 +427,10 @@ command (non-zero exit) and anything in "warnings" is printed but doesn't:
 - an agent with no `name`, or a duplicate `name`
 - an agent with `mode` other than `primary`/`subagent`; more than one
   `primary` agent registry-wide
+- an agent with `mode: primary` that also sets `compose_into_primary: true`
+  (an agent cannot compose into itself)
+- an agent with `compose_into_primary: true` when the registry has no
+  `mode: primary` agent (nothing to compose into)
 - an agent with no `class`, or a `class` not present in `model_classes`
 - an agent whose `prompt` sets neither or both of `file`/`text`, or whose
   `prompt.file` doesn't exist on disk

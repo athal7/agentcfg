@@ -22,6 +22,7 @@ var allCapabilities = []render.Capability{
 	render.CapAgentDefinitions,
 	render.CapPrimaryAgent,
 	render.CapPrimaryAgentToolPermission,
+	render.CapComposeIntoPrimary,
 	render.CapPromptAppend,
 	render.CapPromptFileRef,
 	render.CapAgentSteps,

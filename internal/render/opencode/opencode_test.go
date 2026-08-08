@@ -35,13 +35,13 @@ func TestRender_LeadAndBuildWithOneMCPServer(t *testing.T) {
 		Agents: []registry.Agent{
 			{
 				Name:   "lead",
-				Mode:   "primary",
+				Role:   "primary",
 				Class:  "big",
 				Prompt: registry.Prompt{Text: "You are lead."},
 			},
 			{
 				Name:  "build",
-				Mode:  "subagent",
+				Role:  "delegate",
 				Class: "default",
 				Prompt: registry.Prompt{
 					Text: "You build.",
@@ -182,7 +182,7 @@ func TestRender_UnresolvableMCPServerSkippedWithGap(t *testing.T) {
 		Agents: []registry.Agent{
 			{
 				Name:   "lead",
-				Mode:   "primary",
+				Role:   "primary",
 				Class:  "default",
 				Prompt: registry.Prompt{Text: "You are lead."},
 				Steps:  intPtr(12),
@@ -339,7 +339,7 @@ func TestRender_NoPrimaryAgentOmitsDefaultAgent(t *testing.T) {
 		Agents: []registry.Agent{
 			{
 				Name:   "build",
-				Mode:   "subagent",
+				Role:   "delegate",
 				Class:  "default",
 				Prompt: registry.Prompt{Text: "You build."},
 			},
@@ -372,7 +372,7 @@ func TestRender_PrimaryAgentEditWriteNoGap(t *testing.T) {
 		Agents: []registry.Agent{
 			{
 				Name:   "lead",
-				Mode:   "primary",
+				Role:   "primary",
 				Class:  "default",
 				Prompt: registry.Prompt{Text: "You are lead."},
 				Permissions: registry.Permissions{
@@ -414,9 +414,9 @@ func TestCapabilities_ExcludesUndeclaredOnes(t *testing.T) {
 func TestRenderProject_PinsModelsAndClassBearingAgents(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary", Class: "big"},
-			{Name: "build", Mode: "subagent", Class: "default"},
-			{Name: "no-class", Mode: "subagent"}, // Class unset — must be skipped
+			{Name: "lead", Role: "primary", Class: "big"},
+			{Name: "build", Role: "delegate", Class: "default"},
+			{Name: "no-class", Role: "delegate"}, // Class unset — must be skipped
 		},
 	}
 	classes := map[string]string{
@@ -469,7 +469,7 @@ func TestRenderProject_PinsModelsAndClassBearingAgents(t *testing.T) {
 func TestRenderProject_UnknownClassSkipsAgentDefensively(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "build", Mode: "subagent", Class: "not-in-classes-map"},
+			{Name: "build", Role: "delegate", Class: "not-in-classes-map"},
 		},
 	}
 	classes := map[string]string{"default": "claude-opus", "smol": "claude-haiku"}

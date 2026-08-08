@@ -48,7 +48,7 @@ func mergeFileInto(reg *Registry, fc fileContents, path string, isLocal bool, st
 	mergeKey("version", fc.Version != nil, func() { reg.Version = *fc.Version })
 	mergeKey("harnesses", fc.Harnesses != nil, func() { reg.Harnesses = fc.Harnesses })
 	mergeKey("model_classes", fc.ModelClasses != nil, func() { reg.ModelClasses = fc.ModelClasses })
-	mergeKey("agents", fc.Agents != nil, func() { reg.Agents = fc.Agents })
+	mergeKey("workflow", fc.Workflow != nil, func() { reg.Agents = fc.Workflow.Steps })
 	mergeKey("mcp_servers", fc.MCPServers != nil, func() { reg.MCPServers = fc.MCPServers })
 	mergeKey("contexts", fc.Contexts != nil, func() { reg.Contexts = fc.Contexts })
 

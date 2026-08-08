@@ -38,6 +38,14 @@ type Registry struct {
 	Contexts     []Context
 }
 
+// Workflow is the content of the top-level workflow: key — the registry's
+// one ordered pipeline of steps. v1 supports linear ordering only:
+// declaration order is dispatch order, and each step's Role decides how
+// it participates (see Agent.Role).
+type Workflow struct {
+	Steps []Agent `yaml:"steps"`
+}
+
 // HarnessConfig is the per-harness block under agentcfg.yaml's harnesses:
 // key. Fields are a superset across all v1 harnesses; unused fields for a
 // given harness are simply left empty.
@@ -119,11 +127,14 @@ type AgentMCP struct {
 	Ask    []string `yaml:"ask,omitempty"`
 }
 
-// Agent is one entry under agents.yaml's agents: list.
+// Agent is one entry under workflow.steps: — a workflow step's authoring
+// unit. Each step declares what discipline it needs (Role), not which
+// harness-specific mechanism expresses it; agentcfg compiles Role to each
+// target renderer's native primitive for that discipline (see
+// docs/schema.md and ADR-0001).
 type Agent struct {
 	Name        string      `yaml:"name"`
 	Description string      `yaml:"description,omitempty"`
-	Mode        string      `yaml:"mode,omitempty"`
 	Class       string      `yaml:"class,omitempty"`
 	Prompt      Prompt      `yaml:"prompt"`
 	Targets     []string    `yaml:"targets,omitempty"`
@@ -131,14 +142,15 @@ type Agent struct {
 	Permissions Permissions `yaml:"permissions,omitempty"`
 	MCP         []AgentMCP  `yaml:"mcp,omitempty"`
 
-	// ComposeIntoPrimary tells a renderer that supports
-	// render.CapComposeIntoPrimary (currently only omp) to splice this
-	// agent's prompt content into the primary agent's whole-session
-	// prompt output instead of emitting a standalone dispatchable agent
-	// file for it. A renderer that doesn't declare that capability
-	// (e.g. opencode) ignores this field entirely and renders the agent
-	// exactly as if it were unset. See docs/schema.md.
-	ComposeIntoPrimary bool `yaml:"compose_into_primary,omitempty"`
+	// Role is the step's discipline: "primary" (the workflow's one entry
+	// point/orchestrator), "advisory" (reads and reasons, must not write
+	// or edit — compiles to a real permission-enforced standalone
+	// subagent on opencode, and is spliced into the primary's own prompt
+	// on omp, which has no per-subagent enforcement surface to dispatch
+	// it to safely), or "delegate" (independently dispatchable, full
+	// permissions as declared — a standalone agent on every harness).
+	// Defaults to "delegate" if omitted. See docs/schema.md.
+	Role string `yaml:"role,omitempty"`
 
 	// ResolvedPromptFile is populated by Load (see resolve.go) as the
 	// absolute path of Prompt.File resolved against the registry root.
@@ -294,7 +306,7 @@ type fileContents struct {
 	Harnesses    map[string]HarnessConfig `yaml:"harnesses"`
 	ModelClasses map[string]string        `yaml:"model_classes"`
 	Bash         *BashPolicy              `yaml:"bash"`
-	Agents       []Agent                  `yaml:"agents"`
+	Workflow     *Workflow                `yaml:"workflow"`
 	MCPServers   []MCPServer              `yaml:"mcp_servers"`
 	Contexts     []Context                `yaml:"contexts"`
 }

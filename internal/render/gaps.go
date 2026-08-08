@@ -42,7 +42,7 @@ func DetectGaps(reg *registry.Registry, declared []Capability) []Gap {
 // misleadingly imply the agent is independently dispatchable on this
 // renderer when it isn't.
 func composedAway(a registry.Agent, has map[Capability]bool) bool {
-	return a.ComposeIntoPrimary && has[CapComposeIntoPrimary]
+	return a.Role == "advisory" && has[CapComposeIntoPrimary]
 }
 
 // detectAgentStepsGaps reports a GapSkip for every agent that sets steps:
@@ -111,7 +111,7 @@ func detectPrimaryAgentGap(reg *registry.Registry, has map[Capability]bool) []Ga
 		return nil
 	}
 	for _, a := range reg.Agents {
-		if a.Mode == "primary" {
+		if a.Role == "primary" {
 			return []Gap{{
 				Kind:       GapReduction,
 				Capability: CapPrimaryAgent,
@@ -139,7 +139,7 @@ func detectPrimaryAgentToolPermissionGap(reg *registry.Registry, has map[Capabil
 	}
 	var gaps []Gap
 	for _, a := range reg.Agents {
-		if a.Mode != "primary" {
+		if a.Role != "primary" {
 			continue
 		}
 		if a.Permissions.Edit == "" && a.Permissions.Write == "" {
@@ -261,19 +261,19 @@ func detectMCPPerToolAskGaps(reg *registry.Registry, has map[Capability]bool) []
 	return gaps
 }
 
-// detectComposeIntoPrimaryGaps reports a GapReduction for every agent that
-// sets compose_into_primary: true when the renderer doesn't declare
-// CapComposeIntoPrimary. Unlike a GapSkip, the agent's content isn't
-// dropped: a renderer without this capability still renders the agent as
-// a normal standalone agent file (see docs/schema.md), it just doesn't
-// splice the content into the primary agent's own prompt.
+// detectComposeIntoPrimaryGaps reports a GapReduction for every agent with
+// role: advisory when the renderer doesn't declare CapComposeIntoPrimary.
+// Unlike a GapSkip, the agent's content isn't dropped: a renderer without
+// this capability still renders the agent as a normal standalone agent
+// file (see docs/schema.md), it just doesn't splice the content into the
+// primary agent's own prompt.
 func detectComposeIntoPrimaryGaps(reg *registry.Registry, has map[Capability]bool) []Gap {
 	if has[CapComposeIntoPrimary] {
 		return nil
 	}
 	var gaps []Gap
 	for _, a := range reg.Agents {
-		if !a.ComposeIntoPrimary {
+		if a.Role != "advisory" {
 			continue
 		}
 		gaps = append(gaps, Gap{
@@ -281,7 +281,7 @@ func detectComposeIntoPrimaryGaps(reg *registry.Registry, has map[Capability]boo
 			Capability: CapComposeIntoPrimary,
 			Subject:    fmt.Sprintf("agent:%s", a.Name),
 			Detail: fmt.Sprintf(
-				"agent %q sets compose_into_primary: true; this harness has no such splicing mechanism, so it is rendered as a normal standalone agent instead.",
+				"agent %q has role: advisory; this harness has no splicing mechanism, so it is rendered as a normal standalone agent instead.",
 				a.Name,
 			),
 		})

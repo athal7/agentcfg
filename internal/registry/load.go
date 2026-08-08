@@ -83,7 +83,7 @@ func Load(registryDir string) (*Registry, []ValidationError, []ValidationWarning
 		return nil, nil, nil, statErr
 	}
 
-	normalizeAgentModes(reg)
+	normalizeAgentRoles(reg)
 	resolvePromptPaths(reg)
 
 	vErrs, vWarns2 := Validate(reg)
@@ -94,11 +94,20 @@ func Load(registryDir string) (*Registry, []ValidationError, []ValidationWarning
 }
 
 // parseFile reads path from disk and decodes it as YAML into a fileContents
-// struct.
+// struct. It also rejects the pre-workflow `agents:` key explicitly:
+// agentcfg's YAML decoder silently drops unknown top-level keys, so a
+// registry that hasn't migrated from `agents:` to `workflow:` would
+// otherwise load with its steps quietly missing instead of failing loudly.
 func parseFile(path string) (fileContents, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fileContents{}, fmt.Errorf("reading %s: %w", path, err)
+	}
+	var probe struct {
+		Agents *yaml.RawMessage `yaml:"agents"`
+	}
+	if err := yaml.Unmarshal(data, &probe); err == nil && probe.Agents != nil {
+		return fileContents{}, fmt.Errorf("parsing %s: found a top-level \"agents:\" key — agentcfg migrated to \"workflow:\" (a \"steps:\" list; see docs/schema.md#workflow); rename \"agents:\" to \"workflow:\\n  steps:\" and reindent its entries one level deeper", path)
 	}
 	var fc fileContents
 	if err := yaml.Unmarshal(data, &fc); err != nil {

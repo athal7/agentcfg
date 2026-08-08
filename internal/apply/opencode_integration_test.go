@@ -50,7 +50,7 @@ func TestApply_OpenCodeRender_PreservesHandSetExternalDirectory(t *testing.T) {
 			},
 		},
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary", Class: "default", Prompt: registry.Prompt{Text: "You lead."}},
+			{Name: "lead", Role: "primary", Class: "default", Prompt: registry.Prompt{Text: "You lead."}},
 		},
 	}
 

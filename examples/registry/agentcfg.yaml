@@ -3,7 +3,7 @@ imports:
   - models.yaml
   - bash.yaml
   - mcp.yaml
-  - agents.yaml
+  - workflow.yaml
   - contexts.yaml
 harnesses:
   opencode:

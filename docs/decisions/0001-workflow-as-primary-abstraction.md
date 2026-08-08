@@ -1,6 +1,6 @@
 # ADR-0001: Workflow as the primary registry abstraction, subsuming standalone agents
 
-**Status**: Proposed
+**Status**: Accepted
 
 ## Context
 
@@ -57,6 +57,34 @@ Viable as a middle ground that avoids a hard migration. Ruled out primarily on m
 - Negative: v1's shipped schema, both renderers, `validate`, `doctor`/`capabilities.md`, `docs/schema.md`, and the one example registry all need a breaking rewrite — this is not additive. Migration path: the loader adds a required top-level schema version; a registry declaring the old `agents:` key without a version (or with a version predating this change) must fail `validate` with an actionable "migrate to workflows" error rather than being silently ignored or auto-converted — mixed `agents:`+`workflows:` input in the same registry is invalid.
 - Negative: the omp "independently dispatchable tool" step-shape still has to solve the same standalone-agent-file problems v1 has today (symlink clobbering, #11/#8) — this ADR doesn't remove that surface, just shrinks it to steps that genuinely need it.
 - Negative: exactly how "discipline" is named/classified in the schema (a small closed enum? a set of declarative capability requirements per step?), how model-class binding attaches to a step vs. a harness-specific role, and how existing single-step "just run a tool" registries degrade gracefully are all still open — this ADR settles the *shape* of the decision, not the field-level schema, which needs its own follow-up design pass before implementation starts.
+
+## Resolution
+
+Implemented on top of the existing `Agent` struct rather than introducing
+a new type: `workflow: {steps: [...]}` replaces the top-level `agents:`
+key (`Registry.Agents []Agent`, unchanged Go field, now populated from
+`workflow.steps` instead of a flat list); `Agent.Mode string` and
+`Agent.ComposeIntoPrimary bool` are replaced by a single `Agent.Role
+string` enum — `primary` | `advisory` | `delegate` (default) — closing
+the "small closed enum" question raised above. `role: advisory` requires
+`permissions.edit: deny`/`permissions.write: deny` (validated); the
+omp-reserved-name check (#14) is scoped to `role: delegate` only, since
+that's the only role ever dispatched by name as a standalone omp agent
+file — an `advisory` or `primary` step named `plan` can't hit omp's
+reserved-name hang because neither is ever `task`-dispatched by name.
+A registry still declaring the old `agents:` key fails `Load` with an
+actionable migration error naming `workflow:` instead of silently
+dropping its steps (`internal/registry/load.go`'s `parseFile`), matching
+the Negative-consequence commitment above — implemented as an explicit
+probe-unmarshal rather than a version-gate, since the schema has no
+version bump associated with this change.
+
+`#2` (commands) and `#3` (workflows-as-branching) are **not** touched by
+this change: no `commands:` key exists on `main` to migrate (issue #2's
+PR was still open, unmerged, when this landed), and `workflow.steps`
+here stays declaration-order-linear exactly as scoped above — no step
+IDs, dependencies, or branching. Both remain open follow-ups against
+this now-landed foundation, not part of this ADR's implementation.
 
 ## Links
 - Issues: #2 (commands), #3 (workflows, workflowz comment: https://github.com/athal7/agentcfg/issues/3#issuecomment-5208583789), #4 (MCP audit), #9 (omp tool enforcement gap), #13 (compose-into-primary), #14 (reserved-name hang)

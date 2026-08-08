@@ -310,6 +310,10 @@ func TestRender_MixedLocalAndRemoteMCPServers(t *testing.T) {
 	if _, hasURL := local["url"]; hasURL {
 		t.Errorf("got local-one %#v, want no url key", local)
 	}
+	wantCommand := []any{"gh-mcp"}
+	if !reflect.DeepEqual(local["command"], wantCommand) {
+		t.Errorf("got local-one command %#v, want %#v", local["command"], wantCommand)
+	}
 	remote := mcpObj["remote-one"].(map[string]any)
 	if remote["type"] != "remote" {
 		t.Errorf("got remote-one type %v, want remote", remote["type"])

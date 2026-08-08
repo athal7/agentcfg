@@ -515,7 +515,8 @@ func TestDetectGaps_MCPToolGlobsAndPerToolAskCombineIndependently(t *testing.T) 
 	}
 
 	// Declaring one of the two must not suppress the other: they're
-	// independent capabilities even though they share a server.
+	// independent capabilities even though they share a server. Check
+	// both directions.
 	gapsToolGlobsDeclared := DetectGaps(reg, []Capability{CapMCPToolGlobs})
 	var stillAsk bool
 	for _, g := range gapsToolGlobsDeclared {
@@ -528,5 +529,19 @@ func TestDetectGaps_MCPToolGlobsAndPerToolAskCombineIndependently(t *testing.T) 
 	}
 	if !stillAsk {
 		t.Fatalf("expected mcp_per_tool_ask gap to survive declaring only mcp_tool_globs, got %+v", gapsToolGlobsDeclared)
+	}
+
+	gapsAskDeclared := DetectGaps(reg, []Capability{CapMCPPerToolAsk})
+	var stillToolGlobs bool
+	for _, g := range gapsAskDeclared {
+		if g.Capability == CapMCPPerToolAsk {
+			t.Fatalf("did not expect mcp_per_tool_ask gap when declared, got %+v", g)
+		}
+		if g.Capability == CapMCPToolGlobs {
+			stillToolGlobs = true
+		}
+	}
+	if !stillToolGlobs {
+		t.Fatalf("expected mcp_tool_globs gap to survive declaring only mcp_per_tool_ask, got %+v", gapsAskDeclared)
 	}
 }

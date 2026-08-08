@@ -21,7 +21,7 @@ Only two filenames are special:
   registry root, it's loaded last, after every import, with different merge
   semantics (see below). It's never listed in `imports:`.
 
-Every other filename (`models.yaml`, `bash.yaml`, `agents.yaml`, `mcp.yaml`,
+Every other filename (`models.yaml`, `bash.yaml`, `workflow.yaml`, `mcp.yaml`,
 `contexts.yaml`, `bash.d/*.yaml`, ...) is just a convention — the loader
 doesn't care what a file is named, only what top-level keys it declares.
 Split content across files however you like as long as `agentcfg.yaml`'s
@@ -37,7 +37,7 @@ of these top-level keys — a single "union" shape backs every file:
 | `harnesses` | map of string → harness config | `Registry.Harnesses` |
 | `model_classes` | map of string → string | `Registry.ModelClasses` |
 | `bash` | bash policy object | `Registry.Bash` |
-| `agents` | list of agent objects | `Registry.Agents` |
+| `workflow` | object (`steps:` list) | `Registry.Agents` (flattened from `workflow.steps`) |
 | `mcp_servers` | list of MCP server objects | `Registry.MCPServers` |
 | `contexts` | list of context objects | `Registry.Contexts` |
 
@@ -55,9 +55,9 @@ top-level `agentcfg.yaml`'s `imports:` list is honored.
 
 For every key except `bash`, merging is "declare it in exactly one
 non-local file": if `agentcfg.yaml` and an imported file (or two imported
-files) both declare `agents:`, that's a validation error naming both files
-— no silent last-write-wins for `harnesses`, `model_classes`, `agents`,
-`mcp_servers`, or `contexts`.
+files) both declare `workflow:`, that's a validation error naming both
+files — no silent last-write-wins for `harnesses`, `model_classes`,
+`workflow`, `mcp_servers`, or `contexts`.
 
 `bash:` is the one key with finer-grained merging, so a `bash.yaml` +
 `bash.d/*.yaml` split can each contribute independently:
@@ -211,51 +211,58 @@ the final tiebreak. This is why `"git status"` (exact) always beats
 `"git status*"` (prefix wildcard) even though both have the same number of
 literal characters.
 
-## `agents:`
+## `workflow:`
 
 ```yaml
-agents:
-  - name: build
-    description: "Implements changes"
-    mode: subagent
-    class: default
-    steps: 40
-    targets: [opencode, omp]
-    prompt:
-      text: "You implement code changes following TDD."
-      # — or —
-      # file: prompts/build.md
-    permissions:
-      task: deny
-      edit: allow
-      write: allow
-      skill: allow
-      bash:
-        profile: lead
-        # — or a bare decision instead of a profile —
-        # bash: allow
-      external_directory:
-        "*": ask
-        "~/code/**": allow
-    mcp:
-      - server: context7
-        ask: ["resolve-library-id"]
+workflow:
+  steps:
+    - name: build
+      description: "Implements changes"
+      role: delegate
+      class: default
+      steps: 40
+      targets: [opencode, omp]
+      prompt:
+        text: "You implement code changes following TDD."
+        # — or —
+        # file: prompts/build.md
+      permissions:
+        task: deny
+        edit: allow
+        write: allow
+        skill: allow
+        bash:
+          profile: lead
+          # — or a bare decision instead of a profile —
+          # bash: allow
+        external_directory:
+          "*": ask
+          "~/code/**": allow
+      mcp:
+        - server: context7
+          ask: ["resolve-library-id"]
 ```
 
-Each entry is an `Agent`:
+A registry describes exactly one workflow: a single ordered pipeline of
+steps (v1 supports linear ordering only — declaration order is the only
+ordering signal; DAG-shaped branching is deferred to a future schema
+version). Each entry under `workflow.steps` is an `Agent` — a step's
+authoring unit. A step's `name` is its own stable identifier (used
+verbatim in rendered output, e.g. the omp agent filename); it carries no
+harness-compilation meaning by itself. `role` is the field that selects
+the target-specific compilation mechanism — see [Role](#role) below:
 
 | field | yaml tag | type | notes |
 |---|---|---|---|
-| `Name` | `name` | string | required, must be unique across all agents |
+| `Name` | `name` | string | required, must be unique across all steps |
 | `Description` | `description` | string | optional |
-| `Mode` | `mode` | string | `primary` or `subagent`; defaults to `subagent` if omitted. At most one agent registry-wide may be `primary` |
+| `Role` | `role` | string | `primary`, `advisory`, or `delegate`; defaults to `delegate` if omitted (see [Role](#role) below) |
 | `Class` | `class` | string | required; must name a key present in `model_classes` |
 | `Prompt` | `prompt` | object | exactly one of `file` or `text` (see below) |
-| `Targets` | `targets` | `[]string` | which renderer IDs this agent applies to; omitted/empty means "every renderer" |
+| `Targets` | `targets` | `[]string` | which renderer IDs this step applies to; omitted/empty means "every renderer" |
 | `Steps` | `steps` | `*int` | optional step budget; only some renderers can express this (see `docs/capabilities.md`) |
 | `Permissions` | `permissions` | object | see below |
-| `MCP` | `mcp` | `[]AgentMCP` | which MCP servers this agent may use |
-| `ComposeIntoPrimary` | `compose_into_primary` | bool | defaults to `false`; see [`compose_into_primary`](#compose_into_primary) below |
+| `MCP` | `mcp` | `[]AgentMCP` | which MCP servers this step may use |
 
 `Prompt`:
 
@@ -286,36 +293,42 @@ Each entry is an `Agent`:
 | field | yaml tag | type |
 |---|---|---|
 | `Server` | `server` | string — must name an entry in `mcp_servers` |
-| `Ask` | `ask` | `[]string` — tool-name/glob patterns this agent must be asked about before use |
+| `Ask` | `ask` | `[]string` — tool-name/glob patterns this step must be asked about before use |
 
-### `compose_into_primary`
+### `role`
 
-```yaml
-agents:
-  - name: plan
-    description: "Architects changes before implementation"
-    mode: subagent
-    class: default
-    compose_into_primary: true
-    prompt:
-      text: "You research and design an approach; you do not write or edit files yourself."
-```
+A step's `role` is the discipline it needs, not which harness-specific
+mechanism expresses it — agentcfg compiles `role` to each target
+renderer's native primitive:
 
-`compose_into_primary: true` tells a renderer that supports it (declares
-the `compose_into_primary` capability — see `docs/capabilities.md`) to
-splice this agent's prompt content into the primary agent's own
-whole-session prompt output instead of emitting a standalone,
-independently dispatchable agent file for it. Multiple composing agents
-are appended after the primary's own prompt, each under its own labeled
-section, in the order they're declared in the registry. A renderer that
-doesn't support it (opencode) ignores the field entirely and renders the
-agent exactly as if it were unset — a normal standalone subagent.
+- **`primary`** — the workflow's one entry point/orchestrator session. At
+  most one step registry-wide may set this. Compiles to opencode's
+  `default_agent` and to omp's primary session (`APPEND_SYSTEM.md`).
+- **`advisory`** — reads and reasons but must not write or edit; must set
+  `permissions.edit: deny` and `permissions.write: deny` (validated —
+  `agentcfg validate` rejects an advisory step that doesn't). Requires
+  the registry to have a `primary` step. Compiles to a real,
+  permission-enforced standalone subagent on opencode. On omp, which has
+  no per-subagent enforcement surface it's safe to dispatch a restricted
+  role to, it's instead spliced into the primary's own prompt (declares
+  the `compose_into_primary` capability — see `docs/capabilities.md`):
+  multiple advisory steps are appended after the primary's own prompt,
+  each under its own labeled section, in declaration order. A renderer
+  that doesn't declare `compose_into_primary` (opencode) renders the
+  step exactly as if it were unset — a normal standalone subagent.
+- **`delegate`** — independently dispatchable, full permissions as
+  declared. A standalone agent file on every harness. Only a `delegate`
+  step is ever dispatched by name as a standalone omp agent file, so
+  `agentcfg validate` rejects `name: plan` for this role specifically —
+  it collides with omp's own reserved plan-mode name and hangs when
+  dispatched (a `primary` or `advisory` step named `plan` is never
+  dispatched by name on omp, so the collision can't occur for them).
 
-This is meant for agents whose role is discipline the primary should
-apply when it works directly or dispatches a `task` (a build/implementer
-or plan/architect persona) rather than a specialized, independently
-dispatchable tool (research, browser QA, etc.) — the latter should stay a
-plain standalone agent.
+`role: advisory` is meant for steps whose job is discipline the primary
+should apply when it works directly or dispatches a `task` (a
+build/implementer or plan/architect persona) rather than a specialized,
+independently dispatchable tool (research, browser QA, etc.) — the
+latter should use `role: delegate`.
 
 ## `mcp_servers:`
 
@@ -425,12 +438,14 @@ command (non-zero exit) and anything in "warnings" is printed but doesn't:
 **Errors:**
 - `model_classes` declared but missing `default` or `smol`
 - an agent with no `name`, or a duplicate `name`
-- an agent with `mode` other than `primary`/`subagent`; more than one
-  `primary` agent registry-wide
-- an agent with `mode: primary` that also sets `compose_into_primary: true`
-  (an agent cannot compose into itself)
-- an agent with `compose_into_primary: true` when the registry has no
-  `mode: primary` agent (nothing to compose into)
+- a step with `role` other than `primary`/`advisory`/`delegate`; more than
+  one `primary` step registry-wide
+- a `role: advisory` step that doesn't set both `permissions.edit: deny`
+  and `permissions.write: deny`
+- a `role: advisory` step when the registry has no `role: primary` step
+  (nothing to compose into)
+- a `role: delegate` step named `plan` (collides with omp's reserved
+  plan-mode name — see [Role](#role))
 - an agent with no `class`, or a `class` not present in `model_classes`
 - an agent whose `prompt` sets neither or both of `file`/`text`, or whose
   `prompt.file` doesn't exist on disk

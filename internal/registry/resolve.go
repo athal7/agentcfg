@@ -45,11 +45,11 @@ func resolvePromptPaths(reg *Registry) {
 	}
 }
 
-// normalizeAgentModes defaults an agent's mode to "subagent" when omitted.
-func normalizeAgentModes(reg *Registry) {
+// normalizeAgentRoles defaults a step's role to "delegate" when omitted.
+func normalizeAgentRoles(reg *Registry) {
 	for i := range reg.Agents {
-		if reg.Agents[i].Mode == "" {
-			reg.Agents[i].Mode = "subagent"
+		if reg.Agents[i].Role == "" {
+			reg.Agents[i].Role = "delegate"
 		}
 	}
 }

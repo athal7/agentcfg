@@ -229,9 +229,13 @@ func renderAgent(reg *registry.Registry, a registry.Agent) (map[string]any, erro
 		}
 	}
 
+	opencodeMode := "subagent"
+	if a.Role == "primary" {
+		opencodeMode = "primary"
+	}
 	agentObj := map[string]any{
 		"description": a.Description,
-		"mode":        a.Mode,
+		"mode":        opencodeMode,
 		"model":       reg.ModelClasses[a.Class],
 		"prompt":      renderPrompt(a),
 		"permission":  perm,

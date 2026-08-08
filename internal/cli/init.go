@@ -14,7 +14,7 @@ const starterAgentcfgYAML = `version: 1
 imports:
   - models.yaml
   - bash.yaml
-  - agents.yaml
+  - workflow.yaml
 harnesses:
   opencode:
     out: ~/.config/opencode/opencode.json
@@ -41,13 +41,15 @@ const starterBashYAML = `bash:
       base: allow
 `
 
-// starterAgentsYAML is the scaffold contents init writes for agents.yaml.
-const starterAgentsYAML = `agents:
-  - name: lead
-    mode: primary
-    class: default
-    prompt:
-      text: "You are a helpful assistant."
+// starterWorkflowYAML is the scaffold contents init writes for
+// workflow.yaml.
+const starterWorkflowYAML = `workflow:
+  steps:
+    - name: lead
+      role: primary
+      class: default
+      prompt:
+        text: "You are a helpful assistant."
 `
 
 // newInitCmd builds the init command that scaffolds a new registry.
@@ -74,7 +76,7 @@ func runInit(out io.Writer, registryFlag string) error {
 	files := map[string]string{
 		"models.yaml":   starterModelsYAML,
 		"bash.yaml":     starterBashYAML,
-		"agents.yaml":   starterAgentsYAML,
+		"workflow.yaml": starterWorkflowYAML,
 		"agentcfg.yaml": starterAgentcfgYAML,
 	}
 
@@ -82,7 +84,7 @@ func runInit(out io.Writer, registryFlag string) error {
 	// prevents partial overwrites: if init is run twice, the second
 	// run should fail rather than silently clobbering files it did not
 	// create.
-	for _, name := range []string{"models.yaml", "bash.yaml", "agents.yaml", "agentcfg.yaml"} {
+	for _, name := range []string{"models.yaml", "bash.yaml", "workflow.yaml", "agentcfg.yaml"} {
 		path := filepath.Join(dir, name)
 		if _, err := os.Stat(path); err == nil {
 			return fmt.Errorf("init: %s already exists; refusing to overwrite an existing registry", path)
@@ -98,7 +100,7 @@ func runInit(out io.Writer, registryFlag string) error {
 	// Write agentcfg.yaml last: a partially-written scaffold (e.g. disk
 	// full mid-write) should never look like a complete, loadable
 	// registry — Load only ever looks for agentcfg.yaml first.
-	order := []string{"models.yaml", "bash.yaml", "agents.yaml", "agentcfg.yaml"}
+	order := []string{"models.yaml", "bash.yaml", "workflow.yaml", "agentcfg.yaml"}
 	for _, name := range order {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(files[name]), 0o644); err != nil {
 			return fmt.Errorf("init: writing %s: %w", name, err)

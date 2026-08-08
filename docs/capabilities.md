@@ -33,7 +33,7 @@ omp  bash_unordered_map — via bash_ordered_list
 opencode  bash_ordered_list — via bash_unordered_map
 
 opencode  reduction  compose_into_primary  agent:plan
-    agent "plan" sets compose_into_primary: true; this harness has no such splicing mechanism, so it is rendered as a normal standalone agent instead.
+    agent "plan" has role: advisory; this harness has no splicing mechanism, so it is rendered as a normal standalone agent instead.
 omp  skip  agent_steps  agent:build.steps
     agent "build" sets steps: 40; this harness has no step-budget mechanism, so the step limit is dropped.
 omp  skip  per_agent_bash_policy  lead

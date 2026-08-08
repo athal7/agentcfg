@@ -77,18 +77,19 @@ mcp_servers:
     url: https://mcp.context7.com/mcp
 `,
 		"agents.yaml": `
-agents:
-  - name: lead
-    description: "Primary orchestrator"
-    mode: primary
-    class: default
-    prompt: { file: prompts/lead.md }
-    permissions:
-      task: allow
-      edit: deny
-      write: deny
-      bash: { profile: lead }
-      skill: deny
+workflow:
+  steps:
+    - name: lead
+      description: "Primary orchestrator"
+      role: primary
+      class: default
+      prompt: { file: prompts/lead.md }
+      permissions:
+        task: allow
+        edit: deny
+        write: deny
+        bash: { profile: lead }
+        skill: deny
 `,
 		"contexts.yaml": `
 contexts:
@@ -132,8 +133,8 @@ func TestLoad_HappyPath(t *testing.T) {
 	if len(reg.Agents) != 1 || reg.Agents[0].Name != "lead" {
 		t.Fatalf("Agents = %+v, want one agent named lead", reg.Agents)
 	}
-	if reg.Agents[0].Mode != "primary" {
-		t.Errorf("Agents[0].Mode = %q, want primary", reg.Agents[0].Mode)
+	if reg.Agents[0].Role != "primary" {
+		t.Errorf("Agents[0].Role = %q, want primary", reg.Agents[0].Role)
 	}
 	wantPrompt := filepath.Join(reg.RootDir, "prompts/lead.md")
 	if reg.Agents[0].ResolvedPromptFile != wantPrompt {
@@ -170,6 +171,24 @@ func TestLoad_MalformedYAML(t *testing.T) {
 	_, _, _, err := loadFixture(t, files)
 	if err == nil {
 		t.Fatal("expected hard error for malformed YAML, got nil")
+	}
+}
+
+func TestLoad_LegacyAgentsKeyRejectedWithMigrationError(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+agents:
+  - name: lead
+    mode: primary
+    class: default
+    prompt: { text: "a" }
+`
+	_, _, _, err := loadFixture(t, files)
+	if err == nil {
+		t.Fatal("expected a hard error for a legacy agents: key, got nil")
+	}
+	if !contains(err.Error(), `top-level "agents:" key`) || !contains(err.Error(), "workflow:") {
+		t.Errorf("error = %q, want it to name the legacy key and point to workflow:", err.Error())
 	}
 }
 
@@ -369,13 +388,14 @@ bash:
 func TestValidate_DuplicateAgentName(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `
-agents:
-  - name: lead
-    class: default
-    prompt: { text: "a" }
-  - name: lead
-    class: default
-    prompt: { text: "b" }
+workflow:
+  steps:
+    - name: lead
+      class: default
+      prompt: { text: "a" }
+    - name: lead
+      class: default
+      prompt: { text: "b" }
 `
 	_, errs, _, err := loadFixture(t, files)
 	if err != nil {
@@ -389,59 +409,41 @@ agents:
 func TestValidate_MoreThanOnePrimaryAgent(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `
-agents:
-  - name: lead
-    mode: primary
-    class: default
-    prompt: { text: "a" }
-  - name: lead2
-    mode: primary
-    class: default
-    prompt: { text: "b" }
+workflow:
+  steps:
+    - name: lead
+      role: primary
+      class: default
+      prompt: { text: "a" }
+    - name: lead2
+      role: primary
+      class: default
+      prompt: { text: "b" }
 `
 	_, errs, _, err := loadFixture(t, files)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if !anyErrorContains(errs, "exactly 0 or 1 agent may have mode: primary") {
+	if !anyErrorContains(errs, "exactly 0 or 1 agent may have role: primary") {
 		t.Errorf("errs = %v, want a too-many-primary-agents error", errs)
-	}
-}
-
-func TestValidate_PrimaryAgentCannotComposeIntoItself(t *testing.T) {
-	files := minimalFixtureFiles()
-	files["agents.yaml"] = `
-agents:
-  - name: lead
-    mode: primary
-    class: default
-    compose_into_primary: true
-    prompt: { text: "a" }
-`
-	_, errs, _, err := loadFixture(t, files)
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if !anyErrorContains(errs, `agent "lead" has mode: primary and cannot also set compose_into_primary: true`) {
-		t.Errorf("errs = %v, want a primary-cannot-compose-into-itself error", errs)
 	}
 }
 
 func TestValidate_ComposeIntoPrimaryRequiresAPrimaryAgent(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `
-agents:
-  - name: plan
-    mode: subagent
-    class: default
-    compose_into_primary: true
-    prompt: { text: "a" }
+workflow:
+  steps:
+    - name: plan
+      role: advisory
+      class: default
+      prompt: { text: "a" }
 `
 	_, errs, _, err := loadFixture(t, files)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if !anyErrorContains(errs, `agent "plan" sets compose_into_primary: true but the registry has no mode: primary agent`) {
+	if !anyErrorContains(errs, `agent "plan" has role: advisory but the registry has no role: primary agent to compose into`) {
 		t.Errorf("errs = %v, want a compose-into-primary-needs-a-primary-agent error", errs)
 	}
 }
@@ -449,31 +451,99 @@ agents:
 func TestValidate_ComposeIntoPrimaryWithPrimaryAgentIsValid(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `
-agents:
-  - name: lead
-    mode: primary
-    class: default
-    prompt: { text: "a" }
-  - name: plan
-    mode: subagent
-    class: default
-    compose_into_primary: true
-    prompt: { text: "b" }
+workflow:
+  steps:
+    - name: lead
+      role: primary
+      class: default
+      prompt: { text: "a" }
+    - name: plan
+      role: advisory
+      class: default
+      permissions:
+        edit: deny
+        write: deny
+      prompt: { text: "b" }
 `
 	reg, errs, warns, err := loadFixture(t, files)
 	requireNoProblems(t, errs, warns, err)
-	if !reg.Agents[1].ComposeIntoPrimary {
-		t.Errorf("got ComposeIntoPrimary = false on agent %q, want true", reg.Agents[1].Name)
+	if reg.Agents[1].Role != "advisory" {
+		t.Errorf("got Role = %q on agent %q, want advisory", reg.Agents[1].Role, reg.Agents[1].Name)
+	}
+}
+
+func TestValidate_AdvisoryRoleRequiresEditWriteDeny(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+workflow:
+  steps:
+    - name: lead
+      role: primary
+      class: default
+      prompt: { text: "a" }
+    - name: plan
+      role: advisory
+      class: default
+      prompt: { text: "b" }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `agent "plan" has role: advisory and must set permissions.edit and permissions.write to deny`) {
+		t.Errorf("errs = %v, want an advisory-requires-deny error", errs)
+	}
+}
+
+func TestValidate_ReservedPlanNameRejectedOnlyForDelegateRole(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+workflow:
+  steps:
+    - name: lead
+      role: primary
+      class: default
+      prompt: { text: "a" }
+    - name: plan
+      role: advisory
+      class: default
+      permissions:
+        edit: deny
+        write: deny
+      prompt: { text: "b" }
+`
+	_, errs, warns, err := loadFixture(t, files)
+	requireNoProblems(t, errs, warns, err)
+
+	files["agents.yaml"] = `
+workflow:
+  steps:
+    - name: lead
+      role: primary
+      class: default
+      prompt: { text: "a" }
+    - name: plan
+      role: delegate
+      class: default
+      prompt: { text: "b" }
+`
+	_, errs, _, err = loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `agent name "plan" collides with omp's native plan-mode machinery`) {
+		t.Errorf("errs = %v, want plan reserved-name collision error for role: delegate", errs)
 	}
 }
 
 func TestValidate_AgentUnknownClass(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `
-agents:
-  - name: lead
-    class: nonexistent
-    prompt: { text: "a" }
+workflow:
+  steps:
+    - name: lead
+      class: nonexistent
+      prompt: { text: "a" }
 `
 	_, errs, _, err := loadFixture(t, files)
 	if err != nil {
@@ -504,7 +574,7 @@ func TestValidate_PromptRequiresExactlyOneOfFileOrText(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			files := minimalFixtureFiles()
-			files["agents.yaml"] = "agents:\n  - name: lead\n    class: default\n    prompt: { " + tt.prompt + " }\n"
+			files["agents.yaml"] = "workflow:\n  steps:\n    - name: lead\n      class: default\n      prompt: { " + tt.prompt + " }\n"
 			_, errs, _, err := loadFixture(t, files)
 			if err != nil {
 				t.Fatalf("Load() error = %v", err)
@@ -519,10 +589,11 @@ func TestValidate_PromptRequiresExactlyOneOfFileOrText(t *testing.T) {
 func TestValidate_PromptFileMustExist(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `
-agents:
-  - name: lead
-    class: default
-    prompt: { file: prompts/does-not-exist.md }
+workflow:
+  steps:
+    - name: lead
+      class: default
+      prompt: { file: prompts/does-not-exist.md }
 `
 	delete(files, "prompts/lead.md")
 	_, errs, _, err := loadFixture(t, files)
@@ -559,14 +630,15 @@ func TestValidate_PromptFileResolvedRelativeToRegistryRoot(t *testing.T) {
 func TestValidate_McpWithoutBashDenyWarns(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `
-agents:
-  - name: proxy
-    class: default
-    prompt: { text: "proxies mcp calls" }
-    permissions:
-      bash: allow
-    mcp:
-      - server: context7
+workflow:
+  steps:
+    - name: proxy
+      class: default
+      prompt: { text: "proxies mcp calls" }
+      permissions:
+        bash: allow
+      mcp:
+        - server: context7
 `
 	_, errs, warns, err := loadFixture(t, files)
 	if err != nil {
@@ -583,14 +655,15 @@ agents:
 func TestValidate_McpWithBashDenyDoesNotWarn(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `
-agents:
-  - name: proxy
-    class: default
-    prompt: { text: "proxies mcp calls" }
-    permissions:
-      bash: deny
-    mcp:
-      - server: context7
+workflow:
+  steps:
+    - name: proxy
+      class: default
+      prompt: { text: "proxies mcp calls" }
+      permissions:
+        bash: deny
+      mcp:
+        - server: context7
 `
 	_, errs, warns, err := loadFixture(t, files)
 	requireNoProblems(t, errs, warns, err)
@@ -599,12 +672,13 @@ agents:
 func TestValidate_BashPermissionBareStringMustBeAllowOrDeny(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `
-agents:
-  - name: lead
-    class: default
-    prompt: { text: "a" }
-    permissions:
-      bash: ask
+workflow:
+  steps:
+    - name: lead
+      class: default
+      prompt: { text: "a" }
+      permissions:
+        bash: ask
 `
 	_, errs, _, err := loadFixture(t, files)
 	if err != nil {
@@ -618,12 +692,13 @@ agents:
 func TestValidate_BashPermissionProfileMustExist(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `
-agents:
-  - name: lead
-    class: default
-    prompt: { text: "a" }
-    permissions:
-      bash: { profile: nonexistent }
+workflow:
+  steps:
+    - name: lead
+      class: default
+      prompt: { text: "a" }
+      permissions:
+        bash: { profile: nonexistent }
 `
 	_, errs, _, err := loadFixture(t, files)
 	if err != nil {
@@ -658,21 +733,22 @@ bash:
 func TestLoad_AgentExternalDirectoryPermission(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `
-agents:
-  - name: lead
-    description: "Primary orchestrator"
-    mode: primary
-    class: default
-    prompt: { file: prompts/lead.md }
-    permissions:
-      task: allow
-      edit: deny
-      write: deny
-      bash: { profile: lead }
-      skill: deny
-      external_directory:
-        "*": ask
-        "~/code/**": allow
+workflow:
+  steps:
+    - name: lead
+      description: "Primary orchestrator"
+      role: primary
+      class: default
+      prompt: { file: prompts/lead.md }
+      permissions:
+        task: allow
+        edit: deny
+        write: deny
+        bash: { profile: lead }
+        skill: deny
+        external_directory:
+          "*": ask
+          "~/code/**": allow
 `
 	reg, errs, warns, err := loadFixture(t, files)
 	requireNoProblems(t, errs, warns, err)
@@ -689,14 +765,15 @@ agents:
 func TestValidate_ExternalDirectoryInvalidDecision(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `
-agents:
-  - name: lead
-    mode: primary
-    class: default
-    prompt: { text: "a" }
-    permissions:
-      external_directory:
-        "*": maybe
+workflow:
+  steps:
+    - name: lead
+      role: primary
+      class: default
+      prompt: { text: "a" }
+      permissions:
+        external_directory:
+          "*": maybe
 `
 	_, errs, _, err := loadFixture(t, files)
 	if err != nil {
@@ -735,10 +812,11 @@ model_classes:
   slow: anthropic/claude-opus-5
 `
 	files["agents.yaml"] = `
-agents:
-  - name: lead
-    class: slow
-    prompt: { text: "a" }
+workflow:
+  steps:
+    - name: lead
+      class: slow
+      prompt: { text: "a" }
 `
 	_, errs, _, err := loadFixture(t, files)
 	if err != nil {
@@ -911,17 +989,18 @@ func TestLoad_BashDefaultListsExplicitEmptyOverrides(t *testing.T) {
 	// Use an agent that doesn't reference a bash profile, since local.yaml's
 	// bash: block replaces the entire Bash struct (wiping profiles).
 	files["agents.yaml"] = `
-agents:
-  - name: lead
-    description: "Primary orchestrator"
-    mode: primary
-    class: default
-    prompt: { text: "You are the lead." }
-    permissions:
-      task: allow
-      edit: deny
-      write: deny
-      skill: deny
+workflow:
+  steps:
+    - name: lead
+      description: "Primary orchestrator"
+      role: primary
+      class: default
+      prompt: { text: "You are the lead." }
+      permissions:
+        task: allow
+        edit: deny
+        write: deny
+        skill: deny
 `
 	files["local.yaml"] = `
 bash:
@@ -944,10 +1023,11 @@ bash:
 func TestValidate_PromptFileTraversalRejected(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `
-agents:
-  - name: lead
-    class: default
-    prompt: { file: ../../etc/passwd }
+workflow:
+  steps:
+    - name: lead
+      class: default
+      prompt: { file: ../../etc/passwd }
 `
 	_, errs, _, err := loadFixture(t, files)
 	if err != nil {
@@ -963,10 +1043,11 @@ func TestValidate_PromptFileAbsolutePathRejected(t *testing.T) {
 	// violation, not silently treated as relative-to-root.
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `
-agents:
-  - name: lead
-    class: default
-    prompt: { file: "/etc/prompt.md" }
+workflow:
+  steps:
+    - name: lead
+      class: default
+      prompt: { file: "/etc/prompt.md" }
 `
 	_, errs, _, err := loadFixture(t, files)
 	if err != nil {
@@ -1041,10 +1122,11 @@ harnesses:
 	}
 
 	agentsYAML := `
-agents:
-  - name: lead
-    class: default
-    prompt: { file: prompts/lead.md }
+workflow:
+  steps:
+    - name: lead
+      class: default
+      prompt: { file: prompts/lead.md }
 `
 	if err := os.WriteFile(filepath.Join(regDir, "agents.yaml"), []byte(agentsYAML), 0o644); err != nil {
 		t.Fatalf("write agents.yaml: %v", err)
@@ -1063,10 +1145,11 @@ func TestValidate_PromptFileRelativeInRootStillWorks(t *testing.T) {
 	files := minimalFixtureFiles()
 	// A normal relative path inside the registry should still resolve fine.
 	files["agents.yaml"] = `
-agents:
-  - name: lead
-    class: default
-    prompt: { file: prompts/lead.md }
+workflow:
+  steps:
+    - name: lead
+      class: default
+      prompt: { file: prompts/lead.md }
 `
 	reg, errs, warns, err := loadFixture(t, files)
 	requireNoProblems(t, errs, warns, err)

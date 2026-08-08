@@ -48,7 +48,7 @@ func isValidDecision(d Decision) bool {
 	return d == Allow || d == Deny || d == Ask
 }
 
-// validateAgents reports errors in the registry's agents section.
+// validateAgents reports errors in the registry's workflow steps.
 func validateAgents(reg *Registry) []ValidationError {
 	var errs []ValidationError
 
@@ -57,7 +57,7 @@ func validateAgents(reg *Registry) []ValidationError {
 
 	seenNames := map[string]bool{}
 	primaryCount := 0
-	var composingAgents []string
+	var advisorySteps []string
 
 	for _, a := range reg.Agents {
 		if a.Name == "" {
@@ -68,27 +68,31 @@ func validateAgents(reg *Registry) []ValidationError {
 			seenNames[a.Name] = true
 		}
 
-		mode := a.Mode
-		if mode == "" {
-			mode = "subagent"
-		}
-		switch mode {
+		switch a.Role {
 		case "primary":
 			primaryCount++
-			if a.ComposeIntoPrimary {
+		case "advisory":
+			advisorySteps = append(advisorySteps, a.Name)
+			if a.Permissions.Edit != string(Deny) || a.Permissions.Write != string(Deny) {
 				errs = append(errs, ValidationError{
-					Message: fmt.Sprintf("agent %q has mode: primary and cannot also set compose_into_primary: true (an agent cannot compose into itself)", a.Name),
+					Message: fmt.Sprintf("agent %q has role: advisory and must set permissions.edit and permissions.write to deny (advisory steps must not write)", a.Name),
 				})
 			}
-		case "subagent":
+		case "delegate":
+			// Reserved-name collision: "plan" collides with omp's native
+			// model-role name and interactive plan-mode toggle. Only a
+			// role: delegate step is ever dispatched by name as a
+			// standalone omp agent file — a primary or advisory step
+			// never reaches that dispatch path (see agentcfg#14).
+			if a.Name == "plan" {
+				errs = append(errs, ValidationError{
+					Message: `agent name "plan" collides with omp's native plan-mode machinery and will hang when dispatched — see agentcfg#14`,
+				})
+			}
 		default:
 			errs = append(errs, ValidationError{
-				Message: fmt.Sprintf("agent %q has invalid mode %q (must be primary or subagent)", a.Name, a.Mode),
+				Message: fmt.Sprintf("agent %q has invalid role %q (must be primary, advisory, or delegate)", a.Name, a.Role),
 			})
-		}
-
-		if a.ComposeIntoPrimary && mode != "primary" {
-			composingAgents = append(composingAgents, a.Name)
 		}
 
 		if a.Class == "" {
@@ -146,14 +150,14 @@ func validateAgents(reg *Registry) []ValidationError {
 
 	if primaryCount > 1 {
 		errs = append(errs, ValidationError{
-			Message: fmt.Sprintf("exactly 0 or 1 agent may have mode: primary, found %d", primaryCount),
+			Message: fmt.Sprintf("exactly 0 or 1 agent may have role: primary, found %d", primaryCount),
 		})
 	}
 
 	if primaryCount == 0 {
-		for _, name := range composingAgents {
+		for _, name := range advisorySteps {
 			errs = append(errs, ValidationError{
-				Message: fmt.Sprintf("agent %q sets compose_into_primary: true but the registry has no mode: primary agent to compose into", name),
+				Message: fmt.Sprintf("agent %q has role: advisory but the registry has no role: primary agent to compose into", name),
 			})
 		}
 	}

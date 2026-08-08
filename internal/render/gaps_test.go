@@ -11,7 +11,7 @@ func intPtr(n int) *int { return &n }
 func TestDetectGaps_AgentStepsDropped(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "build", Mode: "subagent", Steps: intPtr(5)},
+			{Name: "build", Role: "delegate", Steps: intPtr(5)},
 		},
 	}
 
@@ -32,7 +32,7 @@ func TestDetectGaps_AgentStepsDropped(t *testing.T) {
 func TestDetectGaps_AgentStepsSuppressedWhenDeclared(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "build", Mode: "subagent", Steps: intPtr(5)},
+			{Name: "build", Role: "delegate", Steps: intPtr(5)},
 		},
 	}
 
@@ -46,7 +46,7 @@ func TestDetectGaps_AgentStepsSuppressedWhenDeclared(t *testing.T) {
 func TestDetectGaps_NoStepsNoGap(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "build", Mode: "subagent"},
+			{Name: "build", Role: "delegate"},
 		},
 	}
 
@@ -60,10 +60,10 @@ func TestDetectGaps_NoStepsNoGap(t *testing.T) {
 func TestDetectGaps_PerAgentBashProfileDropped(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary", Permissions: registry.Permissions{
+			{Name: "lead", Role: "primary", Permissions: registry.Permissions{
 				Bash: registry.BashPermission{Profile: "readonly"},
 			}},
-			{Name: "build", Mode: "subagent"},
+			{Name: "build", Role: "delegate"},
 		},
 	}
 
@@ -89,7 +89,7 @@ func TestDetectGaps_PerAgentBashProfileDropped(t *testing.T) {
 func TestDetectGaps_GlobalBashProfileIsNotPerAgent(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary", Permissions: registry.Permissions{
+			{Name: "lead", Role: "primary", Permissions: registry.Permissions{
 				Bash: registry.BashPermission{Profile: "global"},
 			}},
 		},
@@ -107,7 +107,7 @@ func TestDetectGaps_GlobalBashProfileIsNotPerAgent(t *testing.T) {
 func TestDetectGaps_PerAgentBashPolicySuppressedWhenDeclared(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary", Permissions: registry.Permissions{
+			{Name: "lead", Role: "primary", Permissions: registry.Permissions{
 				Bash: registry.BashPermission{Profile: "readonly"},
 			}},
 		},
@@ -125,8 +125,8 @@ func TestDetectGaps_PerAgentBashPolicySuppressedWhenDeclared(t *testing.T) {
 func TestDetectGaps_PrimaryAgentReductionWhenNeitherCapDeclared(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary"},
-			{Name: "build", Mode: "subagent"},
+			{Name: "lead", Role: "primary"},
+			{Name: "build", Role: "delegate"},
 		},
 	}
 
@@ -152,7 +152,7 @@ func TestDetectGaps_PrimaryAgentReductionWhenNeitherCapDeclared(t *testing.T) {
 func TestDetectGaps_PrimaryAgentSuppressedByPromptAppend(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary"},
+			{Name: "lead", Role: "primary"},
 		},
 	}
 
@@ -168,7 +168,7 @@ func TestDetectGaps_PrimaryAgentSuppressedByPromptAppend(t *testing.T) {
 func TestDetectGaps_PrimaryAgentSuppressedWhenDeclaredDirectly(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary"},
+			{Name: "lead", Role: "primary"},
 		},
 	}
 
@@ -184,7 +184,7 @@ func TestDetectGaps_PrimaryAgentSuppressedWhenDeclaredDirectly(t *testing.T) {
 func TestDetectGaps_NoPrimaryAgentNoGap(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "build", Mode: "subagent"},
+			{Name: "build", Role: "delegate"},
 		},
 	}
 
@@ -200,10 +200,10 @@ func TestDetectGaps_NoPrimaryAgentNoGap(t *testing.T) {
 func TestDetectGaps_PrimaryAgentToolPermissionDropped(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary", Permissions: registry.Permissions{
+			{Name: "lead", Role: "primary", Permissions: registry.Permissions{
 				Edit: "deny", Write: "deny",
 			}},
-			{Name: "build", Mode: "subagent", Permissions: registry.Permissions{
+			{Name: "build", Role: "delegate", Permissions: registry.Permissions{
 				Edit: "allow", Write: "allow",
 			}},
 		},
@@ -231,8 +231,8 @@ func TestDetectGaps_PrimaryAgentToolPermissionDropped(t *testing.T) {
 func TestDetectGaps_PrimaryAgentToolPermissionIgnoresSubagentEditWrite(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary"},
-			{Name: "build", Mode: "subagent", Permissions: registry.Permissions{
+			{Name: "lead", Role: "primary"},
+			{Name: "build", Role: "delegate", Permissions: registry.Permissions{
 				Edit: "allow", Write: "allow",
 			}},
 		},
@@ -250,7 +250,7 @@ func TestDetectGaps_PrimaryAgentToolPermissionIgnoresSubagentEditWrite(t *testin
 func TestDetectGaps_PrimaryAgentToolPermissionSuppressedWhenDeclared(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary", Permissions: registry.Permissions{
+			{Name: "lead", Role: "primary", Permissions: registry.Permissions{
 				Edit: "deny", Write: "deny",
 			}},
 		},
@@ -268,7 +268,7 @@ func TestDetectGaps_PrimaryAgentToolPermissionSuppressedWhenDeclared(t *testing.
 func TestDetectGaps_NoPrimaryAgentEditWriteNoGap(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary"},
+			{Name: "lead", Role: "primary"},
 		},
 	}
 
@@ -284,7 +284,7 @@ func TestDetectGaps_NoPrimaryAgentEditWriteNoGap(t *testing.T) {
 func TestDetectGaps_ExternalDirectoryDropped(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "build", Mode: "subagent", Permissions: registry.Permissions{
+			{Name: "build", Role: "delegate", Permissions: registry.Permissions{
 				ExternalDirectory: map[string]registry.Decision{"*": registry.Ask},
 			}},
 		},
@@ -312,7 +312,7 @@ func TestDetectGaps_ExternalDirectoryDropped(t *testing.T) {
 func TestDetectGaps_ExternalDirectorySuppressedWhenDeclared(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "build", Mode: "subagent", Permissions: registry.Permissions{
+			{Name: "build", Role: "delegate", Permissions: registry.Permissions{
 				ExternalDirectory: map[string]registry.Decision{"*": registry.Ask},
 			}},
 		},
@@ -330,7 +330,7 @@ func TestDetectGaps_ExternalDirectorySuppressedWhenDeclared(t *testing.T) {
 func TestDetectGaps_NoExternalDirectoryNoGap(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "build", Mode: "subagent"},
+			{Name: "build", Role: "delegate"},
 		},
 	}
 
@@ -437,7 +437,7 @@ func TestDetectGaps_NoMCPServersNoGap(t *testing.T) {
 func TestDetectGaps_AgentTaskPermissionDropped(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "build", Mode: "subagent", Permissions: registry.Permissions{Task: "deny"}},
+			{Name: "build", Role: "delegate", Permissions: registry.Permissions{Task: "deny"}},
 		},
 	}
 
@@ -463,7 +463,7 @@ func TestDetectGaps_AgentTaskPermissionDropped(t *testing.T) {
 func TestDetectGaps_AgentTaskPermissionSuppressedWhenDeclared(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "build", Mode: "subagent", Permissions: registry.Permissions{Task: "deny"}},
+			{Name: "build", Role: "delegate", Permissions: registry.Permissions{Task: "deny"}},
 		},
 	}
 
@@ -479,7 +479,7 @@ func TestDetectGaps_AgentTaskPermissionSuppressedWhenDeclared(t *testing.T) {
 func TestDetectGaps_NoAgentTaskPermissionNoGap(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "build", Mode: "subagent"},
+			{Name: "build", Role: "delegate"},
 		},
 	}
 
@@ -495,7 +495,7 @@ func TestDetectGaps_NoAgentTaskPermissionNoGap(t *testing.T) {
 func TestDetectGaps_MCPPerToolAskDropped(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "build", Mode: "subagent", MCP: []registry.AgentMCP{
+			{Name: "build", Role: "delegate", MCP: []registry.AgentMCP{
 				{Server: "github", Ask: []string{"create_*"}},
 			}},
 		},
@@ -523,7 +523,7 @@ func TestDetectGaps_MCPPerToolAskDropped(t *testing.T) {
 func TestDetectGaps_MCPPerToolAskSuppressedWhenDeclared(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "build", Mode: "subagent", MCP: []registry.AgentMCP{
+			{Name: "build", Role: "delegate", MCP: []registry.AgentMCP{
 				{Server: "github", Ask: []string{"create_*"}},
 			}},
 		},
@@ -541,7 +541,7 @@ func TestDetectGaps_MCPPerToolAskSuppressedWhenDeclared(t *testing.T) {
 func TestDetectGaps_NoMCPPerToolAskNoGap(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "build", Mode: "subagent", MCP: []registry.AgentMCP{
+			{Name: "build", Role: "delegate", MCP: []registry.AgentMCP{
 				{Server: "github"},
 			}},
 		},
@@ -565,7 +565,7 @@ func TestDetectGaps_NoMCPPerToolAskNoGap(t *testing.T) {
 func TestDetectGaps_MCPToolGlobsAndPerToolAskCombineIndependently(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "build", Mode: "subagent", MCP: []registry.AgentMCP{
+			{Name: "build", Role: "delegate", MCP: []registry.AgentMCP{
 				{Server: "github", Ask: []string{"create_*"}},
 			}},
 		},
@@ -633,8 +633,8 @@ func TestDetectGaps_MCPToolGlobsAndPerToolAskCombineIndependently(t *testing.T) 
 func TestDetectGaps_ComposeIntoPrimaryReductionWhenUndeclared(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary"},
-			{Name: "plan", Mode: "subagent", ComposeIntoPrimary: true},
+			{Name: "lead", Role: "primary"},
+			{Name: "plan", Role: "advisory"},
 		},
 	}
 
@@ -660,8 +660,8 @@ func TestDetectGaps_ComposeIntoPrimaryReductionWhenUndeclared(t *testing.T) {
 func TestDetectGaps_ComposeIntoPrimarySuppressedWhenDeclared(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary"},
-			{Name: "plan", Mode: "subagent", ComposeIntoPrimary: true},
+			{Name: "lead", Role: "primary"},
+			{Name: "plan", Role: "advisory"},
 		},
 	}
 
@@ -677,8 +677,8 @@ func TestDetectGaps_ComposeIntoPrimarySuppressedWhenDeclared(t *testing.T) {
 func TestDetectGaps_NoComposeIntoPrimaryNoGap(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary"},
-			{Name: "plan", Mode: "subagent"},
+			{Name: "lead", Role: "primary"},
+			{Name: "plan", Role: "delegate"},
 		},
 	}
 
@@ -703,12 +703,11 @@ func TestDetectGaps_ComposedAwaySuppressesPerAgentDispatchGaps(t *testing.T) {
 	steps := 5
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary"},
+			{Name: "lead", Role: "primary"},
 			{
-				Name:               "plan",
-				Mode:               "subagent",
-				ComposeIntoPrimary: true,
-				Steps:              &steps,
+				Name:  "plan",
+				Role:  "advisory",
+				Steps: &steps,
 				Permissions: registry.Permissions{
 					Task:              "deny",
 					Bash:              registry.BashPermission{Profile: "readonly"},
@@ -737,6 +736,40 @@ func TestDetectGaps_ComposedAwaySuppressesPerAgentDispatchGaps(t *testing.T) {
 	}
 }
 
+// TestDetectGaps_AdvisoryWithoutPrimaryDoesNotSuppressGaps covers a
+// registry with no role: primary agent: an advisory agent has nothing to
+// compose into, so it falls back to a normal standalone file (see
+// omp_test.go's TestRender_AdvisoryWithoutPrimaryFallsBackToStandaloneFile)
+// and every per-agent dispatch gap that would otherwise be suppressed for
+// a genuinely composed-away agent must still fire.
+func TestDetectGaps_AdvisoryWithoutPrimaryDoesNotSuppressGaps(t *testing.T) {
+	steps := 5
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{
+				Name:  "plan",
+				Role:  "advisory",
+				Steps: &steps,
+				Permissions: registry.Permissions{
+					Task: "deny",
+				},
+			},
+		},
+	}
+
+	gaps := DetectGaps(reg, []Capability{CapComposeIntoPrimary})
+
+	var found bool
+	for _, g := range gaps {
+		if g.Capability == CapAgentSteps && g.Subject == "agent:plan.steps" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected an agent_steps gap for orphaned advisory agent %q, got %+v", "plan", gaps)
+	}
+}
+
 // TestDetectGaps_ComposeFlagSetButRendererDoesNotSupportItStillGaps
 // covers the opencode-shaped side: when the renderer does NOT declare
 // CapComposeIntoPrimary, the agent renders as a normal standalone agent
@@ -745,12 +778,11 @@ func TestDetectGaps_ComposedAwaySuppressesPerAgentDispatchGaps(t *testing.T) {
 func TestDetectGaps_ComposeFlagSetButRendererDoesNotSupportItStillGaps(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary"},
+			{Name: "lead", Role: "primary"},
 			{
-				Name:               "plan",
-				Mode:               "subagent",
-				ComposeIntoPrimary: true,
-				Permissions:        registry.Permissions{Task: "deny"},
+				Name:        "plan",
+				Role:        "advisory",
+				Permissions: registry.Permissions{Task: "deny"},
 			},
 		},
 	}

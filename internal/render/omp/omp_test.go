@@ -57,14 +57,14 @@ func TestRender_LeadAndBuildProducesFourOutputs(t *testing.T) {
 		Agents: []registry.Agent{
 			{
 				Name:               "lead",
-				Mode:               "primary",
+				Role:               "primary",
 				Class:              "big",
 				Prompt:             registry.Prompt{File: "prompts/lead.md"},
 				ResolvedPromptFile: "/registry/prompts/lead.md",
 			},
 			{
 				Name:               "build",
-				Mode:               "subagent",
+				Role:               "delegate",
 				Class:              "default",
 				Prompt:             registry.Prompt{File: "prompts/build.md"},
 				ResolvedPromptFile: "/registry/prompts/build.md",
@@ -167,13 +167,13 @@ func TestRender_GapsForUndeclaredCapabilities(t *testing.T) {
 		Agents: []registry.Agent{
 			{
 				Name:   "lead",
-				Mode:   "primary",
+				Role:   "primary",
 				Class:  "default",
 				Prompt: registry.Prompt{Text: "You are lead."},
 			},
 			{
 				Name:   "build",
-				Mode:   "subagent",
+				Role:   "delegate",
 				Class:  "default",
 				Prompt: registry.Prompt{Text: "You build."},
 				Steps:  &steps,
@@ -228,7 +228,7 @@ func TestRender_PrimaryAgentEditWriteGap(t *testing.T) {
 		Agents: []registry.Agent{
 			{
 				Name:   "lead",
-				Mode:   "primary",
+				Role:   "primary",
 				Class:  "default",
 				Prompt: registry.Prompt{Text: "You are lead."},
 				Permissions: registry.Permissions{
@@ -445,8 +445,8 @@ func TestRender_AgentTargetsRestrictsOutput(t *testing.T) {
 		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
 		Bash:         baseBashPolicy(),
 		Agents: []registry.Agent{
-			{Name: "vscode-only", Mode: "subagent", Class: "default", Prompt: registry.Prompt{Text: "x"}, Targets: []string{"vscode"}},
-			{Name: "everywhere", Mode: "subagent", Class: "default", Prompt: registry.Prompt{Text: "y"}},
+			{Name: "vscode-only", Role: "delegate", Class: "default", Prompt: registry.Prompt{Text: "x"}, Targets: []string{"vscode"}},
+			{Name: "everywhere", Role: "delegate", Class: "default", Prompt: registry.Prompt{Text: "y"}},
 		},
 		MCPServers: []registry.MCPServer{
 			{Name: "vscode-server", Transport: "local", Command: []registry.Value{{Literal: "x"}}, Targets: []string{"vscode"}},
@@ -484,14 +484,13 @@ func TestRender_ComposeIntoPrimarySplicesIntoAppendSystem(t *testing.T) {
 		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
 		Bash:         baseBashPolicy(),
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary", Class: "default", Prompt: registry.Prompt{Text: "You are the lead."}},
+			{Name: "lead", Role: "primary", Class: "default", Prompt: registry.Prompt{Text: "You are the lead."}},
 			{
-				Name:               "plan",
-				Mode:               "subagent",
-				Class:              "default",
-				Description:        "Architects before implementing",
-				Prompt:             registry.Prompt{Text: "Research before coding."},
-				ComposeIntoPrimary: true,
+				Name:        "plan",
+				Role:        "advisory",
+				Class:       "default",
+				Description: "Architects before implementing",
+				Prompt:      registry.Prompt{Text: "Research before coding."},
 			},
 		},
 	}
@@ -527,9 +526,9 @@ func TestRender_ComposeIntoPrimaryMultipleAgentsKeepDeclarationOrder(t *testing.
 		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
 		Bash:         baseBashPolicy(),
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary", Class: "default", Prompt: registry.Prompt{Text: "Lead prompt."}},
-			{Name: "zebra", Mode: "subagent", Class: "default", Prompt: registry.Prompt{Text: "Zebra prompt."}, ComposeIntoPrimary: true},
-			{Name: "alpha", Mode: "subagent", Class: "default", Prompt: registry.Prompt{Text: "Alpha prompt."}, ComposeIntoPrimary: true},
+			{Name: "lead", Role: "primary", Class: "default", Prompt: registry.Prompt{Text: "Lead prompt."}},
+			{Name: "zebra", Role: "advisory", Class: "default", Prompt: registry.Prompt{Text: "Zebra prompt."}},
+			{Name: "alpha", Role: "advisory", Class: "default", Prompt: registry.Prompt{Text: "Alpha prompt."}},
 		},
 	}
 
@@ -553,14 +552,13 @@ func TestRender_ComposeIntoPrimaryRespectsTargetsExclusion(t *testing.T) {
 		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
 		Bash:         baseBashPolicy(),
 		Agents: []registry.Agent{
-			{Name: "lead", Mode: "primary", Class: "default", Prompt: registry.Prompt{Text: "Lead prompt."}},
+			{Name: "lead", Role: "primary", Class: "default", Prompt: registry.Prompt{Text: "Lead prompt."}},
 			{
-				Name:               "opencode-only",
-				Mode:               "subagent",
-				Class:              "default",
-				Prompt:             registry.Prompt{Text: "Should never appear."},
-				ComposeIntoPrimary: true,
-				Targets:            []string{"opencode"},
+				Name:    "opencode-only",
+				Role:    "advisory",
+				Class:   "default",
+				Prompt:  registry.Prompt{Text: "Should never appear."},
+				Targets: []string{"opencode"},
 			},
 		},
 	}
@@ -578,6 +576,38 @@ func TestRender_ComposeIntoPrimaryRespectsTargetsExclusion(t *testing.T) {
 	appendFile := outputByType[render.WriteFile](t, plan.Outputs)
 	if string(appendFile.Content) != "Lead prompt." {
 		t.Errorf("got APPEND_SYSTEM.md content %q, want %q (opencode-only agent must not splice)", appendFile.Content, "Lead prompt.")
+	}
+}
+
+// TestRender_AdvisoryWithoutPrimaryFallsBackToStandaloneFile covers a
+// registry with no role: primary agent at all: an advisory agent has
+// nothing to compose into, so it must render as a normal standalone
+// file instead of being silently dropped (it must not disappear from
+// both the standalone directory and the — nonexistent — composed
+// prompt).
+func TestRender_AdvisoryWithoutPrimaryFallsBackToStandaloneFile(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{Name: "plan", Role: "advisory", Class: "default", Prompt: registry.Prompt{Text: "Research before coding."}},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	rebuild := outputByType[render.RebuildDir](t, plan.Outputs)
+	if len(rebuild.Files) != 1 || rebuild.Files[0].Path != "plan.md" {
+		t.Fatalf("got files %+v, want exactly one plan.md standalone file", rebuild.Files)
+	}
+
+	for _, o := range plan.Outputs {
+		if wf, ok := o.(render.WriteFile); ok && wf.Path == appendSystemPath {
+			t.Errorf("got an APPEND_SYSTEM.md output %+v, want none (no primary agent to append to)", wf)
+		}
 	}
 }
 

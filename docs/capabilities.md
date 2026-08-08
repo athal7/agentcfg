@@ -37,7 +37,7 @@ opencode  bash_ordered_list — via bash_unordered_map
 opencode  reduction  compose_into_primary  agent:plan
     agent "plan" has role: advisory; this harness has no splicing mechanism, so it is rendered as a normal standalone agent instead.
 opencode  reduction  structured_workflow_command  command:ship
-    command "ship" has 3 steps; this harness has no native structured-workflow mechanism, so the steps are flattened into numbered prose in the same SKILL.md instead.
+    command "ship" has 3 steps; this harness has no native structured-workflow mechanism, so it behaves as flattened, numbered prose here instead of a deterministic multi-phase pipeline.
 omp  skip  agent_steps  agent:build.steps
     agent "build" sets steps: 40; this harness has no step-budget mechanism, so the step limit is dropped.
 omp  skip  per_agent_bash_policy  lead

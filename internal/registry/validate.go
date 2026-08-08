@@ -132,6 +132,16 @@ func validateAgents(reg *Registry) []ValidationError {
 				})
 			}
 		}
+
+		// Reserved-name collision: "plan" collides with omp's native
+		// model-role name and interactive plan-mode toggle. An agent
+		// named "plan" will hang indefinitely when dispatched on omp
+		// (see agentcfg#14).
+		if a.Name == "plan" {
+			errs = append(errs, ValidationError{
+				Message: `agent name "plan" collides with omp's native plan-mode machinery and will hang when dispatched — see agentcfg#14`,
+			})
+		}
 	}
 
 	if primaryCount > 1 {

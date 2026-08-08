@@ -251,6 +251,145 @@ func TestRender_UnresolvableMCPServerSkippedWithGap(t *testing.T) {
 	}
 }
 
+// TestRender_RemoteTransportFailureGap covers a resolver failure for a
+// remote-transport server (a Value backed by an unreadable file), the
+// remote-transport counterpart to TestRender_UnresolvableMCPServerSkippedWithGap
+// above. Regression coverage for the point-fix that stopped hardcoding
+// CapMCPLocalTransport for every resolver failure regardless of the
+// server's actual transport.
+func TestRender_RemoteTransportFailureGap(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		MCPServers: []registry.MCPServer{
+			{
+				Name:      "broken-remote",
+				Transport: "remote",
+				URL:       registry.Value{From: "file", Path: "/definitely/does/not/exist/agentcfg-test-fixture.txt"},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	var found bool
+	for _, g := range plan.Gaps {
+		if g.Capability == render.CapMCPRemoteTransport && g.Subject == "mcp:broken-remote" {
+			found = true
+		}
+		if g.Capability == render.CapMCPLocalTransport {
+			t.Errorf("got mcp_local_transport gap for a remote-transport failure, want mcp_remote_transport: %+v", g)
+		}
+	}
+	if !found {
+		t.Fatalf("expected a mcp_remote_transport gap for mcp:broken-remote, got %+v", plan.Gaps)
+	}
+
+	mcp := outputByType[render.MergeJSON](t, plan.Outputs)
+	servers := mcp.Object["mcpServers"].(map[string]any)
+	if len(servers) != 0 {
+		t.Errorf("got mcpServers %#v, want empty (broken server should be skipped)", servers)
+	}
+}
+
+// TestRender_TransportFailureAndToolGlobsBothGapOnSameServer covers a
+// server that is doubly-affected: its Tools allowlist can never be
+// expressed (omp has no CapMCPToolGlobs) AND its URL fails to resolve
+// (a CapMCPRemoteTransport failure). Both gaps must surface independently
+// for the same server — DetectGaps' structural tool-globs scan runs
+// unconditionally before the per-server resolve loop, so a resolver
+// failure must not swallow the tool-globs gap or vice versa.
+func TestRender_TransportFailureAndToolGlobsBothGapOnSameServer(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		MCPServers: []registry.MCPServer{
+			{
+				Name:      "broken-slack",
+				Transport: "remote",
+				URL:       registry.Value{From: "file", Path: "/definitely/does/not/exist/agentcfg-test-fixture.txt"},
+				Tools:     []string{"slack_search", "slack_send_message"},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	var haveTransport, haveToolGlobs bool
+	for _, g := range plan.Gaps {
+		if g.Subject != "mcp:broken-slack" {
+			continue
+		}
+		switch g.Capability {
+		case render.CapMCPRemoteTransport:
+			haveTransport = true
+		case render.CapMCPToolGlobs:
+			haveToolGlobs = true
+		}
+	}
+	if !haveTransport {
+		t.Errorf("expected a mcp_remote_transport gap for mcp:broken-slack, got %+v", plan.Gaps)
+	}
+	if !haveToolGlobs {
+		t.Errorf("expected a mcp_tool_globs gap for mcp:broken-slack, got %+v", plan.Gaps)
+	}
+
+	mcp := outputByType[render.MergeJSON](t, plan.Outputs)
+	servers := mcp.Object["mcpServers"].(map[string]any)
+	if len(servers) != 0 {
+		t.Errorf("got mcpServers %#v, want empty (broken server should be skipped)", servers)
+	}
+}
+
+// TestRender_MixedLocalAndRemoteMCPServers covers a registry that
+// registers one local-transport and one remote-transport server side by
+// side, both resolvable — the two transports must coexist in one
+// mcpServers map without either one clobbering or gapping the other.
+func TestRender_MixedLocalAndRemoteMCPServers(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		MCPServers: []registry.MCPServer{
+			{Name: "local-one", Transport: "local", Command: []registry.Value{{Literal: "gh-mcp"}}},
+			{Name: "remote-one", Transport: "remote", URL: registry.Value{Literal: "https://api.example.com/mcp"}},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	if len(plan.Gaps) != 0 {
+		t.Fatalf("got %d gaps, want 0: %+v", len(plan.Gaps), plan.Gaps)
+	}
+
+	mcp := outputByType[render.MergeJSON](t, plan.Outputs)
+	servers := mcp.Object["mcpServers"].(map[string]any)
+	if len(servers) != 2 {
+		t.Fatalf("got %d mcpServers, want 2: %#v", len(servers), servers)
+	}
+	local := servers["local-one"].(map[string]any)
+	if local["command"] == nil {
+		t.Errorf("got local-one %#v, want a command key", local)
+	}
+	if _, hasURL := local["url"]; hasURL {
+		t.Errorf("got local-one %#v, want no url key", local)
+	}
+	remote := servers["remote-one"].(map[string]any)
+	if remote["url"] != "https://api.example.com/mcp" {
+		t.Errorf("got remote-one url %#v, want https://api.example.com/mcp", remote["url"])
+	}
+	if _, hasCommand := remote["command"]; hasCommand {
+		t.Errorf("got remote-one %#v, want no command key", remote)
+	}
+}
+
 // TestRender_AgentTargetsRestrictsOutput covers agent.targets: an agent not
 // targeting omp is excluded from the rebuilt agent directory, and an mcp
 // server not targeting omp is excluded from mcp.json.

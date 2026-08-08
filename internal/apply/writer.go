@@ -319,7 +319,7 @@ func writeRebuildTreeManifest(dir string, dirs map[string][]render.WriteFile) er
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, rebuildTreeManifestFile), data, 0o600)
+	return writeFileContent(filepath.Join(dir, rebuildTreeManifestFile), data, 0o600)
 }
 
 // applyRebuildTree writes every entry in r.Dirs into its own subdirectory

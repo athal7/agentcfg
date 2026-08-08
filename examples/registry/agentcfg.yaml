@@ -4,6 +4,7 @@ imports:
   - bash.yaml
   - mcp.yaml
   - agents.yaml
+  - commands.yaml
   - contexts.yaml
 harnesses:
   opencode:

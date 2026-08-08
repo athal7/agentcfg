@@ -105,6 +105,7 @@ func TestToJSONOutput_TypeFieldIsStable(t *testing.T) {
 		{"MergeYAML", render.MergeYAML{Path: "/tmp/x"}, "merge_yaml"},
 		{"MergeTOML", render.MergeTOML{Path: "/tmp/x"}, "merge_toml"},
 		{"RebuildDir", render.RebuildDir{Dir: "/tmp/x"}, "rebuild_dir"},
+		{"RebuildTree", render.RebuildTree{Dir: "/tmp/x"}, "rebuild_tree"},
 		{"RunCommand", render.RunCommand{Argv: []string{"echo", "hi"}}, "run_command"},
 	}
 
@@ -129,6 +130,7 @@ func TestOutputTypeName_StableForAllTypes(t *testing.T) {
 		{"MergeYAML", render.MergeYAML{Path: "/tmp/x"}, "merge_yaml"},
 		{"MergeTOML", render.MergeTOML{Path: "/tmp/x"}, "merge_toml"},
 		{"RebuildDir", render.RebuildDir{Dir: "/tmp/x"}, "rebuild_dir"},
+		{"RebuildTree", render.RebuildTree{Dir: "/tmp/x"}, "rebuild_tree"},
 		{"RunCommand", render.RunCommand{Argv: []string{"echo", "hi"}}, "run_command"},
 	}
 

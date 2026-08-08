@@ -471,3 +471,62 @@ func TestDetectGaps_NoMCPPerToolAskNoGap(t *testing.T) {
 		}
 	}
 }
+
+// TestDetectGaps_MCPToolGlobsAndPerToolAskCombineIndependently covers a
+// single mcp server that is BOTH a structural tool-globs gap (it declares
+// a server-level Tools allowlist) AND a per-tool-ask gap (an agent grants
+// itself that server with an Ask pattern) when the renderer declares
+// neither capability. The two detectors must not shadow each other: both
+// gaps should surface, each with its own distinct subject.
+func TestDetectGaps_MCPToolGlobsAndPerToolAskCombineIndependently(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "build", Mode: "subagent", MCP: []registry.AgentMCP{
+				{Server: "github", Ask: []string{"create_*"}},
+			}},
+		},
+		MCPServers: []registry.MCPServer{
+			{Name: "github", Transport: "remote", Tools: []string{"repo_read", "create_issue"}},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	var toolGlobs, perToolAsk []Gap
+	for _, g := range gaps {
+		switch g.Capability {
+		case CapMCPToolGlobs:
+			toolGlobs = append(toolGlobs, g)
+		case CapMCPPerToolAsk:
+			perToolAsk = append(perToolAsk, g)
+		}
+	}
+	if len(toolGlobs) != 1 {
+		t.Fatalf("got %d mcp_tool_globs gaps, want 1: %+v", len(toolGlobs), toolGlobs)
+	}
+	if toolGlobs[0].Subject != "mcp:github" {
+		t.Errorf("got mcp_tool_globs subject %q, want mcp:github", toolGlobs[0].Subject)
+	}
+	if len(perToolAsk) != 1 {
+		t.Fatalf("got %d mcp_per_tool_ask gaps, want 1: %+v", len(perToolAsk), perToolAsk)
+	}
+	if perToolAsk[0].Subject != "agent:build.mcp:github" {
+		t.Errorf("got mcp_per_tool_ask subject %q, want agent:build.mcp:github", perToolAsk[0].Subject)
+	}
+
+	// Declaring one of the two must not suppress the other: they're
+	// independent capabilities even though they share a server.
+	gapsToolGlobsDeclared := DetectGaps(reg, []Capability{CapMCPToolGlobs})
+	var stillAsk bool
+	for _, g := range gapsToolGlobsDeclared {
+		if g.Capability == CapMCPToolGlobs {
+			t.Fatalf("did not expect mcp_tool_globs gap when declared, got %+v", g)
+		}
+		if g.Capability == CapMCPPerToolAsk {
+			stillAsk = true
+		}
+	}
+	if !stillAsk {
+		t.Fatalf("expected mcp_per_tool_ask gap to survive declaring only mcp_tool_globs, got %+v", gapsToolGlobsDeclared)
+	}
+}

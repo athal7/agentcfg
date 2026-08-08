@@ -40,6 +40,7 @@ of these top-level keys — a single "union" shape backs every file:
 | `workflow` | object (`steps:` list) | `Registry.Agents` (flattened from `workflow.steps`) |
 | `mcp_servers` | list of MCP server objects | `Registry.MCPServers` |
 | `contexts` | list of context objects | `Registry.Contexts` |
+| `commands` | list of command objects | `Registry.Commands` |
 
 ### `imports:`
 
@@ -390,6 +391,125 @@ At least one of `git_remote_host`/`git_remote_owner` is required per
 context entry. An unset match field acts as a wildcard (matches anything);
 both set means both must match.
 
+## `commands:`
+
+A custom agent command (opencode's slash-command feature) is exactly one
+of two shapes: flat (a single prompt) or structured (an ordered list of
+named steps — a multi-step workflow invoked as one command, e.g. a
+plan→build→review pipeline). Each entry is a `Command`:
+
+```yaml
+commands:
+  - name: review
+    description: "Reviews the current diff for correctness and style"
+    prompt:
+      text: "Review the current diff for correctness, style, and test coverage."
+      # — or —
+      # file: prompts/review.md
+
+  - name: ship
+    description: "Plans, implements, and reviews a change end to end"
+    steps:
+      - name: plan
+        prompt:
+          text: "Research the codebase and design an approach before writing code."
+      - name: build
+        prompt:
+          text: "Implement the planned change with tests."
+      - name: review
+        prompt:
+          text: "Review the diff for correctness and run the test suite."
+```
+
+| field | yaml tag | type | notes |
+|---|---|---|---|
+| `Name` | `name` | string | required, unique across all commands; must satisfy the Agent Skills spec's naming rule — lowercase letters, digits, and hyphens only, no leading or trailing hyphen, at most 64 characters |
+| `Description` | `description` | string | required |
+| `Prompt` | `prompt` | object | flat shape: exactly one of `file` or `text` — same shape and validation as an agent's `prompt`. Mutually exclusive with `Steps` — a command sets exactly one of the two |
+| `Steps` | `steps` | `[]CommandStep` | structured shape: an ordered, non-empty list of named phases. Mutually exclusive with `Prompt` |
+
+`CommandStep` (one entry under a structured command's `steps:`):
+
+| field | yaml tag | type | notes |
+|---|---|---|---|
+| `Name` | `name` | string | required, unique within the command (not globally) |
+| `Prompt` | `prompt` | object | exactly one of `file` or `text`, same validation as above |
+
+Unlike `agents:`/`mcp_servers:`, `Command` has **no `targets:` field**.
+`Agent.Targets`/`MCPServer.Targets` exist because those entities render to
+genuinely different, harness-owned artifacts. A command's rendered
+artifact is the identical file for every harness that reads it — there's
+no per-harness shape to opt a command out of (see "Rendering" below).
+
+### Rendering: Agent Skills `SKILL.md`
+
+Every command renders to `~/.agents/skills/<name>/SKILL.md`. A flat
+command's body is its prompt content unchanged:
+
+```markdown
+---
+name: review
+description: Reviews the current diff for correctness and style
+---
+Review the current diff for correctness, style, and test coverage.
+```
+
+A structured command's body flattens its steps into numbered sections,
+prefixed with a directive that triggers omp's native `workflowz` magic
+keyword (a deterministic multi-subagent pipeline contract — see
+`docs/decisions/` and athal7/agentcfg#3's investigation) on a harness
+that recognizes it, and reads as inert extra prose on one that doesn't:
+
+```markdown
+---
+name: ship
+description: Plans, implements, and reviews a change end to end
+---
+Use `workflowz` to run the following phases as a deterministic pipeline via the persistent eval kernel's `agent()`/`parallel()`/`pipeline()` helpers, each phase's output feeding the next.
+
+## 1. plan
+
+Research the codebase and design an approach before writing code.
+
+## 2. build
+
+Implement the planned change with tests.
+
+## 3. review
+
+Review the diff for correctness and run the test suite.
+```
+
+This targets the open [Agent Skills](https://agentskills.io) standard
+rather than opencode's original, now-legacy `.opencode/command/*.md`
+format. Both harnesses agentcfg renders are confirmed — directly against
+each one's own discovery code/docs, not assumed — to read the identical
+path:
+
+- **opencode**: its skill loader walks project-local
+  `.agents/skills/*/SKILL.md` (up to the git worktree root) and global
+  `~/.agents/skills/*/SKILL.md`.
+- **omp**: its `agents` skill provider — omp's own docs call
+  `.agent[s]/skills` "the canonical OMP-native location" — reads the
+  identical path at both project and user scope.
+
+Because the discovery path is identical on both harnesses, rendering a
+command needs **no per-harness translation**: `internal/render/opencode`
+and `internal/render/omp` both declare the `custom_commands` capability
+and both call the same shared `render.RenderCommands` helper, which
+produces byte-identical output for either — see
+`internal/render/commands.go`. This is load-bearing for structured
+commands too: the workflowz directive is baked into the rendered content
+**unconditionally**, never gated on which renderer produced the file —
+both harnesses' plans write the exact same shared path, so content can
+never depend on apply order. `structured_workflow_command` (declared
+only by omp) is purely informational: it reports, via `doctor`/
+`docs/capabilities.md`, that a structured command's native pipeline
+behavior only activates on a renderer declaring it — the rendered
+content itself never varies. Removing a command from the registry prunes
+its previously-rendered `SKILL.md` file and directory on the next
+`agentcfg apply`.
+
 ## The `Value` type: literal, env, file, command, format
 
 Several fields (`mcp_servers[].url`, `mcp_servers[].command[]`,
@@ -459,6 +579,16 @@ command (non-zero exit) and anything in "warnings" is printed but doesn't:
   with no `command`
 - a `contexts` entry with neither `match.git_remote_host` nor
   `match.git_remote_owner` set
+- a command with no `name`, a duplicate `name`, or a `name` that violates
+  the Agent Skills naming rule (uppercase, underscore, leading/trailing
+  hyphen, or over 64 characters)
+- a command with no `description`
+- a command that sets neither or both of `prompt`/`steps`
+- a command's `prompt`, or a step's `prompt`, that sets neither or both
+  of `file`/`text`, or whose `prompt.file` doesn't exist on disk or
+  escapes the registry root
+- a structured command with a step that has no `name`, or a duplicate
+  step `name` within the same command
 
 **Warnings:**
 - an agent that declares `mcp:` servers but doesn't set

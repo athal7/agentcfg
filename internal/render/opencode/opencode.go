@@ -4,6 +4,7 @@ package opencode
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/athal7/agentcfg/internal/bashpolicy"
@@ -57,13 +58,14 @@ func (renderer) Capabilities() []render.Capability {
 		render.CapMCPToolGlobs,
 		render.CapMCPPerToolAsk,
 		render.CapProjectModelPolicy,
+		render.CapCustomCommands,
 	}
 }
 
 // Render produces a Plan that merges the registry into opencode's native
 // opencode.json, covering model classes, agents, permissions, MCP tools,
 // and MCP server configuration.
-func (r renderer) Render(reg *registry.Registry, _ render.Options) (*render.Plan, error) {
+func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Plan, error) {
 	plan := &render.Plan{}
 	plan.Gaps = append(plan.Gaps, render.DetectGaps(reg, r.Capabilities())...)
 
@@ -119,6 +121,16 @@ func (r renderer) Render(reg *registry.Registry, _ render.Options) (*render.Plan
 		Managed: managed,
 		Object:  obj,
 	})
+
+	readFile := opt.ReadFile
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
+	commandsTree, err := render.RenderCommands(reg, readFile)
+	if err != nil {
+		return nil, fmt.Errorf("opencode: rendering commands: %w", err)
+	}
+	plan.Outputs = append(plan.Outputs, commandsTree)
 
 	return plan, nil
 }

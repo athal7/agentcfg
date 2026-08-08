@@ -29,6 +29,8 @@ func DetectGaps(reg *registry.Registry, declared []Capability) []Gap {
 	gaps = append(gaps, detectAgentTaskPermissionGaps(reg, has)...)
 	gaps = append(gaps, detectMCPPerToolAskGaps(reg, has)...)
 	gaps = append(gaps, detectComposeIntoPrimaryGaps(reg, has)...)
+	gaps = append(gaps, detectCustomCommandsGap(reg, has)...)
+	gaps = append(gaps, detectStructuredWorkflowCommandGaps(reg, has)...)
 	return gaps
 }
 
@@ -284,6 +286,67 @@ func detectComposeIntoPrimaryGaps(reg *registry.Registry, has map[Capability]boo
 			Detail: fmt.Sprintf(
 				"agent %q has role: advisory; this harness has no splicing mechanism, so it is rendered as a normal standalone agent instead.",
 				a.Name,
+			),
+		})
+	}
+	return gaps
+}
+
+// detectCustomCommandsGap reports a GapSkip for every registry command
+// when the renderer doesn't declare CapCustomCommands. Unlike
+// detectPrimaryAgentGap, there's no registered substitute pair to check
+// (render.SubstituteOf) — every current renderer that supports custom
+// commands does so via the identical Agent Skills mechanism, so a
+// renderer lacking CapCustomCommands has no alternative expression of a
+// command at all; every one is simply dropped.
+func detectCustomCommandsGap(reg *registry.Registry, has map[Capability]bool) []Gap {
+	if has[CapCustomCommands] {
+		return nil
+	}
+	var gaps []Gap
+	for _, c := range reg.Commands {
+		gaps = append(gaps, Gap{
+			Kind:       GapSkip,
+			Capability: CapCustomCommands,
+			Subject:    fmt.Sprintf("command:%s", c.Name),
+			Detail: fmt.Sprintf(
+				"command %q has no Agent Skills (SKILL.md) support in this harness, so it was dropped entirely.",
+				c.Name,
+			),
+		})
+	}
+	return gaps
+}
+
+// detectStructuredWorkflowCommandGaps reports a GapReduction for every
+// multi-step command (len(Steps) > 0) when the renderer declares
+// CapCustomCommands but not CapStructuredWorkflowCommand. Requiring
+// CapCustomCommands first matters: a renderer lacking even that drops
+// the command entirely (see detectCustomCommandsGap's GapSkip) — it
+// can't also "behave as flattened prose," so reporting both would be
+// contradictory. When CapCustomCommands IS declared, this is
+// informational only: RenderCommands writes identical content
+// regardless of which renderer is asking (see its doc comment), so
+// nothing is actually dropped or altered here; this just surfaces that
+// the current renderer's harness won't interpret the rendered workflowz
+// trigger, so the command behaves as flattened, numbered prose there
+// instead of a deterministic multi-phase pipeline.
+func detectStructuredWorkflowCommandGaps(reg *registry.Registry, has map[Capability]bool) []Gap {
+	if !has[CapCustomCommands] || has[CapStructuredWorkflowCommand] {
+		return nil
+	}
+	var gaps []Gap
+	for _, c := range reg.Commands {
+		if len(c.Steps) == 0 {
+			continue
+		}
+		gaps = append(gaps, Gap{
+			Kind:       GapReduction,
+			Capability: CapStructuredWorkflowCommand,
+			Subject:    fmt.Sprintf("command:%s", c.Name),
+			Detail: fmt.Sprintf(
+				"command %q has %d steps; this harness has no native structured-workflow mechanism, so it behaves as flattened, numbered prose here instead of a deterministic multi-phase pipeline.",
+				c.Name, len(c.Steps),
 			),
 		})
 	}

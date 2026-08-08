@@ -43,6 +43,28 @@ const (
 	CapMCPToolGlobs               Capability = "mcp_tool_globs"
 	CapMCPPerToolAsk              Capability = "mcp_per_tool_ask"
 	CapProjectModelPolicy         Capability = "project_model_policy"
+
+	// CapCustomCommands marks support for custom commands (registry.Command),
+	// rendered as Agent Skills SKILL.md files. Covers both a flat,
+	// single-prompt command and a structured multi-step command flattened
+	// into numbered prose — see CapStructuredWorkflowCommand for the
+	// latter's native (non-flattened) rendering path. Unlike
+	// CapPrimaryAgent/CapPromptAppend, this capability has no registered
+	// substitute pair: both opencode and omp are confirmed to discover the
+	// identical Agent Skills path natively, so both declare it directly
+	// (see internal/render/commands.go) rather than one declaring a
+	// differently-shaped equivalent.
+	CapCustomCommands Capability = "custom_commands"
+
+	// CapStructuredWorkflowCommand marks support for rendering a
+	// multi-step command (registry.Command.Steps) into a harness's
+	// native structured-workflow mechanism, instead of flattening the
+	// steps into plain numbered prose (which CapCustomCommands alone
+	// still does on any renderer). Currently only omp declares this,
+	// via its `workflowz` magic keyword — see
+	// internal/render/commands.go's workflowzDirective and
+	// athal7/agentcfg#3.
+	CapStructuredWorkflowCommand Capability = "structured_workflow_command"
 )
 
 // capabilitySubstitutePairs lists every pair of capabilities that express
@@ -215,6 +237,33 @@ type RebuildDir struct {
 // Describe returns a one-line summary of the directory rebuild for --explain output.
 func (r RebuildDir) Describe() string {
 	return fmt.Sprintf("rebuild %s/%s (%d files)", r.Dir, r.Glob, len(r.Files))
+}
+
+// RebuildTree replaces the immediate subdirectories of Dir with exactly
+// the entries in Dirs (subdirectory name -> files, each WriteFile's Path
+// relative to that subdirectory): a subdirectory of Dir agentcfg itself
+// rendered on a previous apply, but that's absent from Dirs now, is
+// removed in full (recursively) — see internal/apply's
+// rebuildTreeManifestFile for how apply distinguishes "agentcfg rendered
+// this, and no longer wants it" from "something else lives here," since
+// Dir is typically a harness-shared discovery path (e.g. Agent Skills'
+// "~/.agents/skills"), not an agentcfg-exclusive directory.
+//
+// Unlike RebuildDir, which prunes stale files by matching Glob results
+// against each kept file's *basename* (correct when every kept file's
+// basename is unique, e.g. an agent's own "<name>.md"), RebuildTree keys
+// by immediate-subdirectory name instead — the right primitive when
+// every entry's own file has an identical basename across entries (every
+// Agent Skill's file is named "SKILL.md"; basename-based pruning can't
+// tell one command's SKILL.md from another's).
+type RebuildTree struct {
+	Dir  string
+	Dirs map[string][]WriteFile
+}
+
+// Describe returns a one-line summary of the tree rebuild for --explain output.
+func (r RebuildTree) Describe() string {
+	return fmt.Sprintf("rebuild %s/*/ (%d subdirectories)", r.Dir, len(r.Dirs))
 }
 
 // RunCommand runs Argv as part of applying a Plan. Secret marks whether

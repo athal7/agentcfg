@@ -19,6 +19,7 @@ func Validate(reg *Registry) ([]ValidationError, []ValidationWarning) {
 	errs = append(errs, validateBash(reg)...)
 	errs = append(errs, validateMCPServers(reg)...)
 	errs = append(errs, validateContexts(reg)...)
+	errs = append(errs, validateCommands(reg)...)
 	errs = append(errs, validateValues(reg)...)
 
 	return errs, warns
@@ -254,6 +255,78 @@ func validateContexts(reg *Registry) []ValidationError {
 			})
 		}
 	}
+	return errs
+}
+
+// isValidCommandName reports whether name satisfies the Agent Skills spec's
+// naming rule: lowercase letters, digits, and hyphens only, no leading or
+// trailing hyphen, at most 64 characters. Violating this makes the
+// rendered skill silently fail to load in opencode, so it's caught here
+// instead of at either harness's own discovery step.
+func isValidCommandName(name string) bool {
+	if name == "" || len(name) > 64 {
+		return false
+	}
+	if name[0] == '-' || name[len(name)-1] == '-' {
+		return false
+	}
+	for _, r := range name {
+		if r != '-' && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// validateCommands reports errors in the registry's commands section.
+func validateCommands(reg *Registry) []ValidationError {
+	var errs []ValidationError
+
+	rootReal, _ := filepath.EvalSymlinks(reg.RootDir)
+	seenNames := map[string]bool{}
+
+	for _, c := range reg.Commands {
+		if c.Name == "" {
+			errs = append(errs, ValidationError{Message: "command has no name"})
+		} else if seenNames[c.Name] {
+			errs = append(errs, ValidationError{Message: fmt.Sprintf("duplicate command name %q", c.Name)})
+		} else {
+			seenNames[c.Name] = true
+		}
+
+		if c.Name != "" && !isValidCommandName(c.Name) {
+			errs = append(errs, ValidationError{
+				Message: fmt.Sprintf("command %q has invalid name (must be lowercase letters, digits, and hyphens, no leading or trailing hyphen, at most 64 characters)", c.Name),
+			})
+		}
+
+		if c.Description == "" {
+			errs = append(errs, ValidationError{Message: fmt.Sprintf("command %q has no description", c.Name)})
+		}
+
+		switch {
+		case c.Prompt.File == "" && c.Prompt.Text == "":
+			errs = append(errs, ValidationError{
+				Message: fmt.Sprintf("command %q must set exactly one of prompt.file or prompt.text", c.Name),
+			})
+		case c.Prompt.File != "" && c.Prompt.Text != "":
+			errs = append(errs, ValidationError{
+				Message: fmt.Sprintf("command %q must set exactly one of prompt.file or prompt.text, not both", c.Name),
+			})
+		case c.Prompt.File != "":
+			violates, resolved := promptFileTraversal(reg.RootDir, rootReal, c.Prompt.File)
+			if violates {
+				errs = append(errs, ValidationError{
+					Message: fmt.Sprintf("prompt file escapes registry root: %s", c.Prompt.File),
+				})
+			} else if _, err := os.Stat(resolved); err != nil {
+				errs = append(errs, ValidationError{
+					Message: fmt.Sprintf("referenced prompt file does not exist: %s", resolved),
+				})
+			}
+		}
+	}
+
 	return errs
 }
 

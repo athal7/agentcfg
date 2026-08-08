@@ -74,6 +74,8 @@ func applyOne(out render.Output) (applied, skipped string, err error) {
 		return applyMergeTOML(o)
 	case render.RebuildDir:
 		return applyRebuildDir(o)
+	case render.RebuildTree:
+		return applyRebuildTree(o)
 	case render.RunCommand:
 		return applyRunCommand(o)
 	default:
@@ -265,4 +267,53 @@ func applyRebuildDir(r render.RebuildDir) (applied, skipped string, err error) {
 	}
 
 	return fmt.Sprintf("rebuilt %s (%d files)", dir, len(r.Files)), "", nil
+}
+
+// applyRebuildTree writes every entry in r.Dirs into its own subdirectory
+// of r.Dir first, then removes any immediate subdirectory of r.Dir not
+// named in r.Dirs at all — as one unit, so a write failure never leaves
+// stale subdirectories behind. Unlike applyRebuildDir's basename-keyed
+// pruning, this matches by subdirectory name, so entries whose files
+// share an identical basename (every Agent Skill's SKILL.md) don't
+// collide. Not git-guarded, for the same reason RebuildDir isn't: this
+// only ever targets a renderer-owned directory (see RebuildTree's doc
+// comment in internal/render/renderer.go).
+func applyRebuildTree(r render.RebuildTree) (applied, skipped string, err error) {
+	dir, err := expandPath(r.Dir)
+	if err != nil {
+		return "", "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", "", fmt.Errorf("creating directory %s: %w", dir, err)
+	}
+
+	// Write every replacement subdirectory's files first. If any write
+	// fails, no stale subdirectory has been removed yet.
+	for name, files := range r.Dirs {
+		for _, f := range files {
+			path := filepath.Join(dir, name, f.Path)
+			if err := writeFileContent(path, f.Content, f.Mode); err != nil {
+				return "", "", err
+			}
+		}
+	}
+
+	// Now remove every immediate subdirectory of dir that isn't in r.Dirs.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", "", fmt.Errorf("reading directory %s: %w", dir, err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, ok := r.Dirs[e.Name()]; ok {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+			return "", "", fmt.Errorf("removing stale directory %s: %w", e.Name(), err)
+		}
+	}
+
+	return fmt.Sprintf("rebuilt %s (%d subdirectories)", dir, len(r.Dirs)), "", nil
 }

@@ -29,6 +29,7 @@ func DetectGaps(reg *registry.Registry, declared []Capability) []Gap {
 	gaps = append(gaps, detectAgentTaskPermissionGaps(reg, has)...)
 	gaps = append(gaps, detectMCPPerToolAskGaps(reg, has)...)
 	gaps = append(gaps, detectComposeIntoPrimaryGaps(reg, has)...)
+	gaps = append(gaps, detectCustomCommandsGap(reg, has)...)
 	return gaps
 }
 
@@ -284,6 +285,32 @@ func detectComposeIntoPrimaryGaps(reg *registry.Registry, has map[Capability]boo
 			Detail: fmt.Sprintf(
 				"agent %q has role: advisory; this harness has no splicing mechanism, so it is rendered as a normal standalone agent instead.",
 				a.Name,
+			),
+		})
+	}
+	return gaps
+}
+
+// detectCustomCommandsGap reports a GapSkip for every registry command
+// when the renderer doesn't declare CapCustomCommands. Unlike
+// detectPrimaryAgentGap, there's no registered substitute pair to check
+// (render.SubstituteOf) — every current renderer that supports custom
+// commands does so via the identical Agent Skills mechanism, so a
+// renderer lacking CapCustomCommands has no alternative expression of a
+// command at all; every one is simply dropped.
+func detectCustomCommandsGap(reg *registry.Registry, has map[Capability]bool) []Gap {
+	if has[CapCustomCommands] {
+		return nil
+	}
+	var gaps []Gap
+	for _, c := range reg.Commands {
+		gaps = append(gaps, Gap{
+			Kind:       GapSkip,
+			Capability: CapCustomCommands,
+			Subject:    fmt.Sprintf("command:%s", c.Name),
+			Detail: fmt.Sprintf(
+				"command %q has no Agent Skills (SKILL.md) support in this harness, so it was dropped entirely.",
+				c.Name,
 			),
 		})
 	}

@@ -43,6 +43,15 @@ const (
 	CapMCPToolGlobs               Capability = "mcp_tool_globs"
 	CapMCPPerToolAsk              Capability = "mcp_per_tool_ask"
 	CapProjectModelPolicy         Capability = "project_model_policy"
+
+	// CapCustomCommands marks support for flat, single-prompt custom
+	// commands (registry.Command), rendered as Agent Skills SKILL.md
+	// files. Unlike CapPrimaryAgent/CapPromptAppend, this capability has
+	// no registered substitute pair: both opencode and omp are confirmed
+	// to discover the identical Agent Skills path natively, so both
+	// declare it directly (see internal/render/commands.go) rather than
+	// one declaring a differently-shaped equivalent.
+	CapCustomCommands Capability = "custom_commands"
 )
 
 // capabilitySubstitutePairs lists every pair of capabilities that express
@@ -215,6 +224,28 @@ type RebuildDir struct {
 // Describe returns a one-line summary of the directory rebuild for --explain output.
 func (r RebuildDir) Describe() string {
 	return fmt.Sprintf("rebuild %s/%s (%d files)", r.Dir, r.Glob, len(r.Files))
+}
+
+// RebuildTree replaces the immediate subdirectories of Dir with exactly
+// the entries in Dirs (subdirectory name -> files, each WriteFile's Path
+// relative to that subdirectory): a pre-existing immediate subdirectory
+// of Dir not named in Dirs is removed in full (recursively).
+//
+// Unlike RebuildDir, which prunes stale files by matching Glob results
+// against each kept file's *basename* (correct when every kept file's
+// basename is unique, e.g. an agent's own "<name>.md"), RebuildTree keys
+// by immediate-subdirectory name instead — the right primitive when
+// every entry's own file has an identical basename across entries (every
+// Agent Skill's file is named "SKILL.md"; basename-based pruning can't
+// tell one command's SKILL.md from another's).
+type RebuildTree struct {
+	Dir  string
+	Dirs map[string][]WriteFile
+}
+
+// Describe returns a one-line summary of the tree rebuild for --explain output.
+func (r RebuildTree) Describe() string {
+	return fmt.Sprintf("rebuild %s/*/ (%d subdirectories)", r.Dir, len(r.Dirs))
 }
 
 // RunCommand runs Argv as part of applying a Plan. Secret marks whether

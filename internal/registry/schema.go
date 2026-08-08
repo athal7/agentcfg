@@ -36,6 +36,7 @@ type Registry struct {
 	Agents       []Agent
 	MCPServers   []MCPServer
 	Contexts     []Context
+	Commands     []Command
 }
 
 // Workflow is the content of the top-level workflow: key — the registry's
@@ -155,6 +156,24 @@ type Agent struct {
 	// ResolvedPromptFile is populated by Load (see resolve.go) as the
 	// absolute path of Prompt.File resolved against the registry root.
 	// Empty when the agent uses Prompt.Text instead.
+	ResolvedPromptFile string `yaml:"-"`
+}
+
+// Command is one entry under commands.yaml's commands: list — a flat,
+// single-prompt custom agent command (opencode-style slash command / an
+// Agent Skills SKILL.md), as opposed to a multi-step workflow (a separate,
+// not-yet-built concept). Unlike Agent and MCPServer, Command has no
+// Targets field: it renders to one harness-agnostic Agent Skills path
+// every current renderer discovers identically — see
+// internal/render/commands.go and docs/schema.md's commands: section.
+type Command struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	Prompt      Prompt `yaml:"prompt"`
+
+	// ResolvedPromptFile is populated by Load (see resolve.go) as the
+	// absolute path of Prompt.File resolved against the registry root.
+	// Empty when the command uses Prompt.Text instead.
 	ResolvedPromptFile string `yaml:"-"`
 }
 
@@ -309,6 +328,7 @@ type fileContents struct {
 	Workflow     *Workflow                `yaml:"workflow"`
 	MCPServers   []MCPServer              `yaml:"mcp_servers"`
 	Contexts     []Context                `yaml:"contexts"`
+	Commands     []Command                `yaml:"commands"`
 }
 
 // expandHome expands a leading ~ or ~/ to the current user's home directory.

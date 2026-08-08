@@ -23,6 +23,7 @@
 | mcp_tool_globs | ✓ | ✗ |
 | mcp_per_tool_ask | ✓ | ✗ |
 | project_model_policy | ✓ | ✓ |
+| custom_commands | ✓ | ✓ |
 
 ≈ = same underlying feature, expressed via a different harness-native mechanism (not a gap):
 omp  primary_agent — via prompt_append

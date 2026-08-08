@@ -57,6 +57,7 @@ func validateAgents(reg *Registry) []ValidationError {
 
 	seenNames := map[string]bool{}
 	primaryCount := 0
+	var composingAgents []string
 
 	for _, a := range reg.Agents {
 		if a.Name == "" {
@@ -74,11 +75,20 @@ func validateAgents(reg *Registry) []ValidationError {
 		switch mode {
 		case "primary":
 			primaryCount++
+			if a.ComposeIntoPrimary {
+				errs = append(errs, ValidationError{
+					Message: fmt.Sprintf("agent %q has mode: primary and cannot also set compose_into_primary: true (an agent cannot compose into itself)", a.Name),
+				})
+			}
 		case "subagent":
 		default:
 			errs = append(errs, ValidationError{
 				Message: fmt.Sprintf("agent %q has invalid mode %q (must be primary or subagent)", a.Name, a.Mode),
 			})
+		}
+
+		if a.ComposeIntoPrimary && mode != "primary" {
+			composingAgents = append(composingAgents, a.Name)
 		}
 
 		if a.Class == "" {
@@ -138,6 +148,14 @@ func validateAgents(reg *Registry) []ValidationError {
 		errs = append(errs, ValidationError{
 			Message: fmt.Sprintf("exactly 0 or 1 agent may have mode: primary, found %d", primaryCount),
 		})
+	}
+
+	if primaryCount == 0 {
+		for _, name := range composingAgents {
+			errs = append(errs, ValidationError{
+				Message: fmt.Sprintf("agent %q sets compose_into_primary: true but the registry has no mode: primary agent to compose into", name),
+			})
+		}
 	}
 
 	return errs

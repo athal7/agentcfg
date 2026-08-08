@@ -43,6 +43,7 @@ func (renderer) ID() string { return id }
 func (renderer) Capabilities() []render.Capability {
 	return []render.Capability{
 		render.CapAgentDefinitions,
+		render.CapComposeIntoPrimary,
 		render.CapPromptAppend,
 		render.CapPromptFileRef,
 		render.CapModelClassBinding,
@@ -81,10 +82,14 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 		if err != nil {
 			return nil, fmt.Errorf("omp: primary agent %q: %w", primary.Name, err)
 		}
+		composed, err := composedSections(reg, readFile)
+		if err != nil {
+			return nil, err
+		}
 		plan.Outputs = append(plan.Outputs, render.WriteFile{
 			Path:    appendSystemPath,
 			Mode:    0600,
-			Content: []byte(body),
+			Content: []byte(body + composed),
 		})
 	}
 
@@ -147,12 +152,14 @@ func (r renderer) RenderProject(classes map[string]string, _ *registry.Registry,
 }
 
 // renderAgentFiles builds one WriteFile per non-primary agent targeting
-// omp. Paths are relative to agentsDir, per RebuildDir's documented
-// convention.
+// omp, excluding any agent with compose_into_primary: true — that content
+// is spliced into the primary's APPEND_SYSTEM.md instead (see
+// composedSections). Paths are relative to agentsDir, per RebuildDir's
+// documented convention.
 func renderAgentFiles(reg *registry.Registry, readFile func(string) ([]byte, error)) ([]render.WriteFile, error) {
 	var files []render.WriteFile
 	for _, a := range reg.Agents {
-		if a.Mode == "primary" || !targets(a.Targets) {
+		if a.Mode == "primary" || !targets(a.Targets) || a.ComposeIntoPrimary {
 			continue
 		}
 		body, err := promptBody(a, readFile)
@@ -166,6 +173,33 @@ func renderAgentFiles(reg *registry.Registry, readFile func(string) ([]byte, err
 		})
 	}
 	return files, nil
+}
+
+// composedSections builds the Markdown appended after the primary agent's
+// own prompt body in APPEND_SYSTEM.md: one "## <name>[: <description>]"
+// section per non-primary, omp-targeting agent with
+// compose_into_primary: true, in registry declaration order. Returns ""
+// (no-op) when no agent composes into the primary.
+func composedSections(reg *registry.Registry, readFile func(string) ([]byte, error)) (string, error) {
+	var b strings.Builder
+	for _, a := range reg.Agents {
+		if a.Mode == "primary" || !a.ComposeIntoPrimary || !targets(a.Targets) {
+			continue
+		}
+		body, err := promptBody(a, readFile)
+		if err != nil {
+			return "", fmt.Errorf("omp: composed agent %q: %w", a.Name, err)
+		}
+		b.WriteString("\n\n## ")
+		b.WriteString(a.Name)
+		if a.Description != "" {
+			b.WriteString(": ")
+			b.WriteString(a.Description)
+		}
+		b.WriteString("\n\n")
+		b.WriteString(body)
+	}
+	return b.String(), nil
 }
 
 // renderAgentFile builds one subagent markdown file: YAML frontmatter

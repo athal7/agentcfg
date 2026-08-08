@@ -21,6 +21,7 @@ import (
 var allCapabilities = []render.Capability{
 	render.CapAgentDefinitions,
 	render.CapPrimaryAgent,
+	render.CapComposeIntoPrimary,
 	render.CapPromptAppend,
 	render.CapPromptFileRef,
 	render.CapAgentSteps,

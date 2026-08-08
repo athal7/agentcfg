@@ -131,6 +131,15 @@ type Agent struct {
 	Permissions Permissions `yaml:"permissions,omitempty"`
 	MCP         []AgentMCP  `yaml:"mcp,omitempty"`
 
+	// ComposeIntoPrimary tells a renderer that supports
+	// render.CapComposeIntoPrimary (currently only omp) to splice this
+	// agent's prompt content into the primary agent's whole-session
+	// prompt output instead of emitting a standalone dispatchable agent
+	// file for it. A renderer that doesn't declare that capability
+	// (e.g. opencode) ignores this field entirely and renders the agent
+	// exactly as if it were unset. See docs/schema.md.
+	ComposeIntoPrimary bool `yaml:"compose_into_primary,omitempty"`
+
 	// ResolvedPromptFile is populated by Load (see resolve.go) as the
 	// absolute path of Prompt.File resolved against the registry root.
 	// Empty when the agent uses Prompt.Text instead.

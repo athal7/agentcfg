@@ -24,6 +24,7 @@ type Capability string
 const (
 	CapAgentDefinitions    Capability = "agent_definitions"
 	CapPrimaryAgent        Capability = "primary_agent"
+	CapComposeIntoPrimary  Capability = "compose_into_primary"
 	CapPromptAppend        Capability = "prompt_append"
 	CapPromptFileRef       Capability = "prompt_file_reference"
 	CapAgentSteps          Capability = "agent_steps"

@@ -289,9 +289,116 @@ func TestRender_AgentTargetsRestrictsOutput(t *testing.T) {
 	}
 }
 
+// TestRender_ComposeIntoPrimarySplicesIntoAppendSystem covers the core
+// compose_into_primary behavior: the composing agent gets no standalone
+// file, and its prompt is appended as a labeled section after the
+// primary's own prompt in APPEND_SYSTEM.md.
+func TestRender_ComposeIntoPrimarySplicesIntoAppendSystem(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary", Class: "default", Prompt: registry.Prompt{Text: "You are the lead."}},
+			{
+				Name:               "plan",
+				Mode:               "subagent",
+				Class:              "default",
+				Description:        "Architects before implementing",
+				Prompt:             registry.Prompt{Text: "Research before coding."},
+				ComposeIntoPrimary: true,
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	rebuild := outputByType[render.RebuildDir](t, plan.Outputs)
+	if len(rebuild.Files) != 0 {
+		t.Errorf("got %d standalone agent files, want 0 (composing agent must not get one): %+v", len(rebuild.Files), rebuild.Files)
+	}
+
+	appendFile := outputByType[render.WriteFile](t, plan.Outputs)
+	want := "You are the lead.\n\n## plan: Architects before implementing\n\nResearch before coding."
+	if string(appendFile.Content) != want {
+		t.Errorf("got APPEND_SYSTEM.md content:\n%s\nwant:\n%s", appendFile.Content, want)
+	}
+
+	for _, g := range plan.Gaps {
+		if g.Capability == render.CapComposeIntoPrimary {
+			t.Errorf("did not expect a compose_into_primary gap when omp declares the capability, got %+v", g)
+		}
+	}
+}
+
+// TestRender_ComposeIntoPrimaryMultipleAgentsKeepDeclarationOrder covers
+// more than one composed agent: sections must appear in registry
+// declaration order, not alphabetical or any other order.
+func TestRender_ComposeIntoPrimaryMultipleAgentsKeepDeclarationOrder(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary", Class: "default", Prompt: registry.Prompt{Text: "Lead prompt."}},
+			{Name: "zebra", Mode: "subagent", Class: "default", Prompt: registry.Prompt{Text: "Zebra prompt."}, ComposeIntoPrimary: true},
+			{Name: "alpha", Mode: "subagent", Class: "default", Prompt: registry.Prompt{Text: "Alpha prompt."}, ComposeIntoPrimary: true},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	appendFile := outputByType[render.WriteFile](t, plan.Outputs)
+	want := "Lead prompt.\n\n## zebra\n\nZebra prompt.\n\n## alpha\n\nAlpha prompt."
+	if string(appendFile.Content) != want {
+		t.Errorf("got APPEND_SYSTEM.md content:\n%s\nwant (declaration order, zebra then alpha):\n%s", appendFile.Content, want)
+	}
+}
+
+// TestRender_ComposeIntoPrimaryRespectsTargetsExclusion covers an agent
+// that sets compose_into_primary: true but targets a different harness
+// only: omp must neither emit a standalone file nor splice its content.
+func TestRender_ComposeIntoPrimaryRespectsTargetsExclusion(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary", Class: "default", Prompt: registry.Prompt{Text: "Lead prompt."}},
+			{
+				Name:               "opencode-only",
+				Mode:               "subagent",
+				Class:              "default",
+				Prompt:             registry.Prompt{Text: "Should never appear."},
+				ComposeIntoPrimary: true,
+				Targets:            []string{"opencode"},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	rebuild := outputByType[render.RebuildDir](t, plan.Outputs)
+	if len(rebuild.Files) != 0 {
+		t.Errorf("got %d standalone agent files, want 0: %+v", len(rebuild.Files), rebuild.Files)
+	}
+
+	appendFile := outputByType[render.WriteFile](t, plan.Outputs)
+	if string(appendFile.Content) != "Lead prompt." {
+		t.Errorf("got APPEND_SYSTEM.md content %q, want %q (opencode-only agent must not splice)", appendFile.Content, "Lead prompt.")
+	}
+}
+
 func TestCapabilities_OnlyDeclaresWhatIsBuilt(t *testing.T) {
 	want := map[render.Capability]bool{
 		render.CapAgentDefinitions:   true,
+		render.CapComposeIntoPrimary: true,
 		render.CapPromptAppend:       true,
 		render.CapPromptFileRef:      true,
 		render.CapModelClassBinding:  true,

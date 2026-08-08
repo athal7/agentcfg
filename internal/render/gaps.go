@@ -27,6 +27,7 @@ func DetectGaps(reg *registry.Registry, declared []Capability) []Gap {
 	gaps = append(gaps, detectMCPToolGlobsGaps(reg, has)...)
 	gaps = append(gaps, detectAgentTaskPermissionGaps(reg, has)...)
 	gaps = append(gaps, detectMCPPerToolAskGaps(reg, has)...)
+	gaps = append(gaps, detectComposeIntoPrimaryGaps(reg, has)...)
 	return gaps
 }
 
@@ -204,6 +205,34 @@ func detectMCPPerToolAskGaps(reg *registry.Registry, has map[Capability]bool) []
 				),
 			})
 		}
+	}
+	return gaps
+}
+
+// detectComposeIntoPrimaryGaps reports a GapReduction for every agent that
+// sets compose_into_primary: true when the renderer doesn't declare
+// CapComposeIntoPrimary. Unlike a GapSkip, the agent's content isn't
+// dropped: a renderer without this capability still renders the agent as
+// a normal standalone agent file (see docs/schema.md), it just doesn't
+// splice the content into the primary agent's own prompt.
+func detectComposeIntoPrimaryGaps(reg *registry.Registry, has map[Capability]bool) []Gap {
+	if has[CapComposeIntoPrimary] {
+		return nil
+	}
+	var gaps []Gap
+	for _, a := range reg.Agents {
+		if !a.ComposeIntoPrimary {
+			continue
+		}
+		gaps = append(gaps, Gap{
+			Kind:       GapReduction,
+			Capability: CapComposeIntoPrimary,
+			Subject:    fmt.Sprintf("agent:%s", a.Name),
+			Detail: fmt.Sprintf(
+				"agent %q sets compose_into_primary: true; this harness has no such splicing mechanism, so it is rendered as a normal standalone agent instead.",
+				a.Name,
+			),
+		})
 	}
 	return gaps
 }

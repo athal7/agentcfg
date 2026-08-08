@@ -408,6 +408,65 @@ agents:
 	}
 }
 
+func TestValidate_PrimaryAgentCannotComposeIntoItself(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+agents:
+  - name: lead
+    mode: primary
+    class: default
+    compose_into_primary: true
+    prompt: { text: "a" }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `agent "lead" has mode: primary and cannot also set compose_into_primary: true`) {
+		t.Errorf("errs = %v, want a primary-cannot-compose-into-itself error", errs)
+	}
+}
+
+func TestValidate_ComposeIntoPrimaryRequiresAPrimaryAgent(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+agents:
+  - name: plan
+    mode: subagent
+    class: default
+    compose_into_primary: true
+    prompt: { text: "a" }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `agent "plan" sets compose_into_primary: true but the registry has no mode: primary agent`) {
+		t.Errorf("errs = %v, want a compose-into-primary-needs-a-primary-agent error", errs)
+	}
+}
+
+func TestValidate_ComposeIntoPrimaryWithPrimaryAgentIsValid(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+agents:
+  - name: lead
+    mode: primary
+    class: default
+    prompt: { text: "a" }
+  - name: plan
+    mode: subagent
+    class: default
+    compose_into_primary: true
+    prompt: { text: "b" }
+`
+	reg, errs, warns, err := loadFixture(t, files)
+	requireNoProblems(t, errs, warns, err)
+	if !reg.Agents[1].ComposeIntoPrimary {
+		t.Errorf("got ComposeIntoPrimary = false on agent %q, want true", reg.Agents[1].Name)
+	}
+}
+
 func TestValidate_AgentUnknownClass(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `

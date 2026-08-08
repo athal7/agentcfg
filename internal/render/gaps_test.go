@@ -471,3 +471,64 @@ func TestDetectGaps_NoMCPPerToolAskNoGap(t *testing.T) {
 		}
 	}
 }
+
+func TestDetectGaps_ComposeIntoPrimaryReductionWhenUndeclared(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary"},
+			{Name: "plan", Mode: "subagent", ComposeIntoPrimary: true},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	var found *Gap
+	for i := range gaps {
+		if gaps[i].Capability == CapComposeIntoPrimary {
+			found = &gaps[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected a compose_into_primary gap, got %+v", gaps)
+	}
+	if found.Kind != GapReduction {
+		t.Errorf("got kind %s, want reduction (content survives as a standalone agent)", found.Kind)
+	}
+	if found.Subject != "agent:plan" {
+		t.Errorf("got subject %q, want agent:plan", found.Subject)
+	}
+}
+
+func TestDetectGaps_ComposeIntoPrimarySuppressedWhenDeclared(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary"},
+			{Name: "plan", Mode: "subagent", ComposeIntoPrimary: true},
+		},
+	}
+
+	gaps := DetectGaps(reg, []Capability{CapComposeIntoPrimary})
+
+	for _, g := range gaps {
+		if g.Capability == CapComposeIntoPrimary {
+			t.Fatalf("did not expect compose_into_primary gap when declared, got %+v", g)
+		}
+	}
+}
+
+func TestDetectGaps_NoComposeIntoPrimaryNoGap(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary"},
+			{Name: "plan", Mode: "subagent"},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	for _, g := range gaps {
+		if g.Capability == CapComposeIntoPrimary {
+			t.Fatalf("did not expect compose_into_primary gap when unset, got %+v", g)
+		}
+	}
+}

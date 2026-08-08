@@ -4,6 +4,7 @@
 |---|---|---|
 | agent_definitions | ✓ | ✓ |
 | primary_agent | ✓ | ≈ |
+| primary_agent_tool_permission | ✓ | ✗ |
 | compose_into_primary | ✗ | ✓ |
 | prompt_append | ≈ | ✓ |
 | prompt_file_reference | ✓ | ✓ |
@@ -37,6 +38,8 @@ omp  skip  agent_steps  agent:build.steps
     agent "build" sets steps: 40; this harness has no step-budget mechanism, so the step limit is dropped.
 omp  skip  per_agent_bash_policy  lead
     this harness has no per-agent bash scoping; only the global bash profile is applied, harness-wide, so per-agent profile overrides are dropped.
+omp  skip  primary_agent_tool_permission  agent:lead.permissions
+    agent "lead" is the primary agent and sets permissions.edit="deny"/permissions.write="deny"; this harness has no per-agent tool-permission surface for the primary session (only subagents get one), so the restriction is dropped and the primary session keeps full edit/write access.
 omp  skip  external_directory_policy  agent:lead.permissions.external_directory
     agent "lead" sets permissions.external_directory; this harness has no external-directory access policy, so it was dropped.
 omp  skip  agent_task_permission  agent:lead.permissions.task

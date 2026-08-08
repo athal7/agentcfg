@@ -40,6 +40,41 @@ func (renderer) ID() string { return id }
 
 // Capabilities returns the set of registry features this renderer can
 // express in omp's native config.
+//
+// Deliberately absent: CapPrimaryAgentToolPermission. omp's primary
+// session gets only a system-prompt append (CapPromptAppend) — there is no
+// per-agent config file or permission block for it the way subagents get
+// (renderAgentFile's tools: frontmatter honors permissions.edit/write for
+// every non-primary agent already). A permissions.edit/write set on a
+// mode:primary agent is therefore dropped; DetectGaps reports it via
+// detectPrimaryAgentToolPermissionGap.
+//
+// This is NOT the "omp's --tools= CLI flag is broken" bug it looks like at
+// first glance (github.com/athal7/agentcfg/issues/9's original hypothesis).
+// Investigated empirically against omp v17.2.5 (source:
+// github.com/can1357/oh-my-pi, packages/coding-agent/src/tools/index.ts's
+// createTools + sdk.ts's toolRegistry construction) and confirmed live:
+// `omp --tools=<list-without-write-or-edit>` correctly removes both from
+// the registered/callable tool set — verified via `--mode=json` raw
+// tool-call transcripts, not just the model's own (unreliable) self-report.
+// `tools.approval`/`tools.approvalMode` is confirmed orthogonal too: it
+// only gates the approval PROMPT for tools already in the active set, it
+// can't resurrect an excluded one.
+//
+// The actual reasons this can't be closed from agentcfg's side:
+//  1. --tools= is a CLI-invocation-time flag. agentcfg only renders
+//     persistent config files (~/.omp/agent/*) and runs `omp config set`
+//     for settings that have a persistent key; it does not control how
+//     the user invokes the `omp` binary, and omp's settings schema has no
+//     persistent write.enabled/edit.enabled key (unlike bash.enabled,
+//     lsp.enabled, etc.) it could set instead.
+//  2. Even granted a lever, excluding write/edit alone doesn't stop file
+//     mutation if bash or eval remain enabled for the primary session —
+//     confirmed empirically: with bash allowed and write/edit excluded, a
+//     restricted omp session wrote a file via `bash`'s shell redirection
+//     instead, satisfying the request without ever calling `write`. Fully
+//     enforcing "must delegate file changes" requires denying every
+//     code-execution tool on the primary session, not just write/edit.
 func (renderer) Capabilities() []render.Capability {
 	return []render.Capability{
 		render.CapAgentDefinitions,

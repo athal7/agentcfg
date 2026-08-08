@@ -197,6 +197,90 @@ func TestDetectGaps_NoPrimaryAgentNoGap(t *testing.T) {
 	}
 }
 
+func TestDetectGaps_PrimaryAgentToolPermissionDropped(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary", Permissions: registry.Permissions{
+				Edit: "deny", Write: "deny",
+			}},
+			{Name: "build", Mode: "subagent", Permissions: registry.Permissions{
+				Edit: "allow", Write: "allow",
+			}},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	var found *Gap
+	for i := range gaps {
+		if gaps[i].Capability == CapPrimaryAgentToolPermission {
+			found = &gaps[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected a primary_agent_tool_permission gap, got %+v", gaps)
+	}
+	if found.Kind != GapSkip {
+		t.Errorf("got kind %s, want skip", found.Kind)
+	}
+	if found.Subject != "agent:lead.permissions" {
+		t.Errorf("got subject %q, want agent:lead.permissions", found.Subject)
+	}
+}
+
+func TestDetectGaps_PrimaryAgentToolPermissionIgnoresSubagentEditWrite(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary"},
+			{Name: "build", Mode: "subagent", Permissions: registry.Permissions{
+				Edit: "allow", Write: "allow",
+			}},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	for _, g := range gaps {
+		if g.Capability == CapPrimaryAgentToolPermission {
+			t.Fatalf("did not expect primary_agent_tool_permission gap from a subagent's edit/write, got %+v", g)
+		}
+	}
+}
+
+func TestDetectGaps_PrimaryAgentToolPermissionSuppressedWhenDeclared(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary", Permissions: registry.Permissions{
+				Edit: "deny", Write: "deny",
+			}},
+		},
+	}
+
+	gaps := DetectGaps(reg, []Capability{CapPrimaryAgentToolPermission})
+
+	for _, g := range gaps {
+		if g.Capability == CapPrimaryAgentToolPermission {
+			t.Fatalf("did not expect primary_agent_tool_permission gap when declared, got %+v", g)
+		}
+	}
+}
+
+func TestDetectGaps_NoPrimaryAgentEditWriteNoGap(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "lead", Mode: "primary"},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	for _, g := range gaps {
+		if g.Capability == CapPrimaryAgentToolPermission {
+			t.Fatalf("did not expect primary_agent_tool_permission gap when primary agent's edit/write are unset, got %+v", g)
+		}
+	}
+}
+
 func TestDetectGaps_ExternalDirectoryDropped(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
@@ -469,6 +553,80 @@ func TestDetectGaps_NoMCPPerToolAskNoGap(t *testing.T) {
 		if g.Capability == CapMCPPerToolAsk {
 			t.Fatalf("did not expect mcp_per_tool_ask gap when no ask patterns set, got %+v", g)
 		}
+	}
+}
+
+// TestDetectGaps_MCPToolGlobsAndPerToolAskCombineIndependently covers a
+// single mcp server that is BOTH a structural tool-globs gap (it declares
+// a server-level Tools allowlist) AND a per-tool-ask gap (an agent grants
+// itself that server with an Ask pattern) when the renderer declares
+// neither capability. The two detectors must not shadow each other: both
+// gaps should surface, each with its own distinct subject.
+func TestDetectGaps_MCPToolGlobsAndPerToolAskCombineIndependently(t *testing.T) {
+	reg := &registry.Registry{
+		Agents: []registry.Agent{
+			{Name: "build", Mode: "subagent", MCP: []registry.AgentMCP{
+				{Server: "github", Ask: []string{"create_*"}},
+			}},
+		},
+		MCPServers: []registry.MCPServer{
+			{Name: "github", Transport: "remote", Tools: []string{"repo_read", "create_issue"}},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	var toolGlobs, perToolAsk []Gap
+	for _, g := range gaps {
+		switch g.Capability {
+		case CapMCPToolGlobs:
+			toolGlobs = append(toolGlobs, g)
+		case CapMCPPerToolAsk:
+			perToolAsk = append(perToolAsk, g)
+		}
+	}
+	if len(toolGlobs) != 1 {
+		t.Fatalf("got %d mcp_tool_globs gaps, want 1: %+v", len(toolGlobs), toolGlobs)
+	}
+	if toolGlobs[0].Subject != "mcp:github" {
+		t.Errorf("got mcp_tool_globs subject %q, want mcp:github", toolGlobs[0].Subject)
+	}
+	if len(perToolAsk) != 1 {
+		t.Fatalf("got %d mcp_per_tool_ask gaps, want 1: %+v", len(perToolAsk), perToolAsk)
+	}
+	if perToolAsk[0].Subject != "agent:build.mcp:github" {
+		t.Errorf("got mcp_per_tool_ask subject %q, want agent:build.mcp:github", perToolAsk[0].Subject)
+	}
+
+	// Declaring one of the two must not suppress the other: they're
+	// independent capabilities even though they share a server. Check
+	// both directions.
+	gapsToolGlobsDeclared := DetectGaps(reg, []Capability{CapMCPToolGlobs})
+	var stillAsk bool
+	for _, g := range gapsToolGlobsDeclared {
+		if g.Capability == CapMCPToolGlobs {
+			t.Fatalf("did not expect mcp_tool_globs gap when declared, got %+v", g)
+		}
+		if g.Capability == CapMCPPerToolAsk {
+			stillAsk = true
+		}
+	}
+	if !stillAsk {
+		t.Fatalf("expected mcp_per_tool_ask gap to survive declaring only mcp_tool_globs, got %+v", gapsToolGlobsDeclared)
+	}
+
+	gapsAskDeclared := DetectGaps(reg, []Capability{CapMCPPerToolAsk})
+	var stillToolGlobs bool
+	for _, g := range gapsAskDeclared {
+		if g.Capability == CapMCPPerToolAsk {
+			t.Fatalf("did not expect mcp_per_tool_ask gap when declared, got %+v", g)
+		}
+		if g.Capability == CapMCPToolGlobs {
+			stillToolGlobs = true
+		}
+	}
+	if !stillToolGlobs {
+		t.Fatalf("expected mcp_tool_globs gap to survive declaring only mcp_per_tool_ask, got %+v", gapsAskDeclared)
 	}
 }
 

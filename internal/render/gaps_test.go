@@ -556,12 +556,6 @@ func TestDetectGaps_NoMCPPerToolAskNoGap(t *testing.T) {
 	}
 }
 
-// TestDetectGaps_MCPToolGlobsAndPerToolAskCombineIndependently covers a
-// single mcp server that is BOTH a structural tool-globs gap (it declares
-// a server-level Tools allowlist) AND a per-tool-ask gap (an agent grants
-// itself that server with an Ask pattern) when the renderer declares
-// neither capability. The two detectors must not shadow each other: both
-// gaps should surface, each with its own distinct subject.
 func TestDetectGaps_MCPToolGlobsAndPerToolAskCombineIndependently(t *testing.T) {
 	reg := &registry.Registry{
 		Agents: []registry.Agent{
@@ -797,5 +791,83 @@ func TestDetectGaps_ComposeFlagSetButRendererDoesNotSupportItStillGaps(t *testin
 	}
 	if !found {
 		t.Fatalf("expected an agent_task_permission gap for agent:plan on a renderer without CapComposeIntoPrimary, got %+v", gaps)
+	}
+}
+
+func TestDetectGaps_CustomCommandsDropped(t *testing.T) {
+	reg := &registry.Registry{
+		Commands: []registry.Command{
+			{Name: "review", Description: "Reviews a diff"},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	if len(gaps) != 1 {
+		t.Fatalf("got %d gaps, want 1: %+v", len(gaps), gaps)
+	}
+	g := gaps[0]
+	if g.Kind != GapSkip || g.Capability != CapCustomCommands {
+		t.Errorf("got kind=%s capability=%s, want skip/custom_commands", g.Kind, g.Capability)
+	}
+	if g.Subject != "command:review" {
+		t.Errorf("got subject %q, want command:review", g.Subject)
+	}
+}
+
+// TestDetectGaps_StructuredWorkflowNotReportedWhenCommandAlreadyDropped
+// covers the CodeRabbit finding on PR #27: a renderer lacking even
+// CapCustomCommands drops a stepped command entirely (GapSkip) — it
+// can't also "behave as flattened prose" there, so no
+// structured_workflow_command reduction should additionally fire.
+func TestDetectGaps_StructuredWorkflowNotReportedWhenCommandAlreadyDropped(t *testing.T) {
+	reg := &registry.Registry{
+		Commands: []registry.Command{
+			{
+				Name:        "ship",
+				Description: "Plan, build, and ship a change",
+				Steps: []registry.CommandStep{
+					{Name: "plan"},
+					{Name: "build"},
+				},
+			},
+		},
+	}
+
+	gaps := DetectGaps(reg, nil)
+
+	if len(gaps) != 1 {
+		t.Fatalf("got %d gaps, want 1 (custom_commands skip only): %+v", len(gaps), gaps)
+	}
+	if gaps[0].Capability != CapCustomCommands || gaps[0].Kind != GapSkip {
+		t.Errorf("got gap %+v, want a custom_commands skip", gaps[0])
+	}
+}
+
+func TestDetectGaps_CustomCommandsSuppressedWhenDeclared(t *testing.T) {
+	reg := &registry.Registry{
+		Commands: []registry.Command{
+			{Name: "review", Description: "Reviews a diff"},
+		},
+	}
+
+	gaps := DetectGaps(reg, []Capability{CapCustomCommands})
+
+	for _, g := range gaps {
+		if g.Capability == CapCustomCommands {
+			t.Fatalf("did not expect custom_commands gap when declared, got %+v", g)
+		}
+	}
+}
+
+func TestDetectGaps_NoCommandsNoGap(t *testing.T) {
+	reg := &registry.Registry{}
+
+	gaps := DetectGaps(reg, nil)
+
+	for _, g := range gaps {
+		if g.Capability == CapCustomCommands {
+			t.Fatalf("did not expect custom_commands gap when no commands declared, got %+v", g)
+		}
 	}
 }

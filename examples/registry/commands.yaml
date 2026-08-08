@@ -1,0 +1,18 @@
+commands:
+  - name: review
+    description: "Reviews the current diff for correctness and style"
+    prompt:
+      text: "Review the current diff for correctness, style, and test coverage. Call out anything risky before it merges."
+
+  - name: ship
+    description: "Plans, implements, and reviews a change end to end"
+    steps:
+      - name: plan
+        prompt:
+          text: "Research the codebase and design an approach before writing code."
+      - name: build
+        prompt:
+          text: "Implement the planned change with tests."
+      - name: review
+        prompt:
+          text: "Review the diff for correctness and run the test suite."

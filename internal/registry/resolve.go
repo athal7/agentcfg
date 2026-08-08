@@ -28,9 +28,10 @@ func promptFileTraversal(rootDir, rootReal, promptFile string) (violates bool, r
 	return false, resolved
 }
 
-// resolvePromptPaths fills in Agent.ResolvedPromptFile for every agent using
-// prompt.file, joining it against the registry root (never cwd, never home).
-// Paths that escape the registry root are left empty; validation catches them.
+// resolvePromptPaths fills in ResolvedPromptFile for every agent and every
+// command using prompt.file, joining it against the registry root (never
+// cwd, never home). Paths that escape the registry root are left empty;
+// validation catches them.
 func resolvePromptPaths(reg *Registry) {
 	rootReal, _ := filepath.EvalSymlinks(reg.RootDir)
 
@@ -41,6 +42,26 @@ func resolvePromptPaths(reg *Registry) {
 				continue
 			}
 			reg.Agents[i].ResolvedPromptFile = resolved
+		}
+	}
+
+	for i := range reg.Commands {
+		if reg.Commands[i].Prompt.File != "" {
+			violates, resolved := promptFileTraversal(reg.RootDir, rootReal, reg.Commands[i].Prompt.File)
+			if violates {
+				continue
+			}
+			reg.Commands[i].ResolvedPromptFile = resolved
+		}
+		for j := range reg.Commands[i].Steps {
+			if reg.Commands[i].Steps[j].Prompt.File == "" {
+				continue
+			}
+			violates, resolved := promptFileTraversal(reg.RootDir, rootReal, reg.Commands[i].Steps[j].Prompt.File)
+			if violates {
+				continue
+			}
+			reg.Commands[i].Steps[j].ResolvedPromptFile = resolved
 		}
 	}
 }

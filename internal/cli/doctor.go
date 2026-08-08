@@ -40,6 +40,8 @@ var allCapabilities = []render.Capability{
 	render.CapMCPToolGlobs,
 	render.CapMCPPerToolAsk,
 	render.CapProjectModelPolicy,
+	render.CapCustomCommands,
+	render.CapStructuredWorkflowCommand,
 }
 
 // newDoctorCmd builds the doctor command.

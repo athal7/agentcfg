@@ -181,12 +181,13 @@ func applyExtra(obj map[string]any, extra map[string]any) ([]string, error) {
 
 	managed := make([]string, 0, len(extra))
 	for key, value := range extra {
-		root, leaf, dotted := strings.Cut(key, ".")
+		root, suffix, dotted := strings.Cut(key, ".")
 		if reservedTopLevelKeys[root] {
 			return nil, fmt.Errorf("opencode: harnesses.opencode.extra key %q collides with a key Render already manages", key)
 		}
 		if root == "permission" {
-			if !dotted || leaf == "" {
+			leaf, _, nested := strings.Cut(suffix, ".")
+			if !dotted || leaf == "" || nested {
 				return nil, fmt.Errorf(`opencode: harnesses.opencode.extra key %q must be "permission.<leaf>" (Render already owns the bare "permission" object)`, key)
 			}
 			if reservedPermissionLeaves[leaf] {

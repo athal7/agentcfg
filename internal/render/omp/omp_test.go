@@ -888,3 +888,48 @@ func TestRender_ExtraSettingsCommandsEmittedSortedExcludingToolsApproval(t *test
 		t.Errorf("got %d tools.approval RunCommands, want exactly 1", count)
 	}
 }
+
+// TestRenderAgentFile_ExcludesToolIDsFromServerNotTargetingOmp covers a
+// real gap: an MCP server scoped to a different renderer (targets:
+// [opencode]) must not leak into an omp agent's frontmatter tools: list
+// — that server is absent from omp's mcp.json and tools.approval, so
+// granting its tool ids in frontmatter would let an agent "see" tools it
+// can never actually reach.
+func TestRenderAgentFile_ExcludesToolIDsFromServerNotTargetingOmp(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{
+				Name:   "github",
+				Role:   "delegate",
+				Class:  "default",
+				Prompt: registry.Prompt{Text: "You reach GitHub."},
+				MCP:    []registry.AgentMCP{{Server: "github"}},
+			},
+		},
+		MCPServers: []registry.MCPServer{
+			{
+				Name:      "github",
+				Transport: "remote",
+				URL:       registry.Value{Literal: "https://api.githubcopilot.com/mcp/"},
+				Tools:     []string{"search_code"},
+				Targets:   []string{"opencode"},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	dir := outputByType[render.RebuildDir](t, plan.Outputs)
+	if len(dir.Files) != 1 {
+		t.Fatalf("got %d agent files, want 1", len(dir.Files))
+	}
+	content := string(dir.Files[0].Content)
+	if strings.Contains(content, "mcp__github_search_code") {
+		t.Errorf("agent file tools: line must not grant mcp__github_search_code (server targets opencode only), got:\n%s", content)
+	}
+}

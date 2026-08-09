@@ -648,3 +648,24 @@ func TestRender_HarnessExtraRejectsReservedPermissionLeaf(t *testing.T) {
 		t.Fatal("expected an error for extra permission.bash colliding with Render's own leaf, got nil")
 	}
 }
+
+// TestRender_HarnessExtraRejectsNestedPermissionPath covers a validation
+// bypass: "permission.read.foo" must not slip past the reserved-leaf
+// check by having its leaf computed as "read.foo" (which doesn't match
+// the reserved "read" entry) — nested permission paths are rejected
+// outright, since setDottedPath would otherwise replace Render's
+// permission.read scalar with an object.
+func TestRender_HarnessExtraRejectsNestedPermissionPath(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Harnesses: map[string]registry.HarnessConfig{
+			"opencode": {Extra: map[string]any{"permission.read.foo": "allow"}},
+		},
+	}
+
+	_, err := New().Render(reg, render.Options{})
+	if err == nil {
+		t.Fatal("expected an error for a nested permission.read.foo extra key, got nil")
+	}
+}

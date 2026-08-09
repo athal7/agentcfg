@@ -228,6 +228,9 @@ func renderAgentFiles(reg *registry.Registry, readFile func(string) ([]byte, err
 	hasPrimary := render.PrimaryAgent(reg) != nil
 	serversByName := make(map[string]registry.MCPServer, len(reg.MCPServers))
 	for _, s := range reg.MCPServers {
+		if !targets(s.Targets) {
+			continue
+		}
 		serversByName[s.Name] = s
 	}
 	var files []render.WriteFile

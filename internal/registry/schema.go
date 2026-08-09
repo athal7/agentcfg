@@ -165,30 +165,9 @@ type Agent struct {
 	// Defaults to "delegate" if omitted. See docs/schema.md.
 	Role string `yaml:"role,omitempty"`
 
-	// HarnessPrompts optionally appends target-specific additional
-	// prompt content after Prompt, keyed by target renderer id (e.g.
-	// "omp"). Lets a step share one prompt body across every harness
-	// while still carrying framing that only applies to one of them —
-	// e.g. omp's primary needing delegation/build guidance that doesn't
-	// belong on opencode's lead (which has edit/write denied, unlike
-	// omp's primary). A renderer whose own id has no entry here renders
-	// Prompt alone, unchanged.
-	HarnessPrompts map[string]HarnessPrompt `yaml:"harness_prompts,omitempty"`
-
 	// ResolvedPromptFile is populated by Load (see resolve.go) as the
 	// absolute path of Prompt.File resolved against the registry root.
 	// Empty when the agent uses Prompt.Text instead.
-	ResolvedPromptFile string `yaml:"-"`
-}
-
-// HarnessPrompt is one entry under an agent's harness_prompts: map — see
-// Agent.HarnessPrompts.
-type HarnessPrompt struct {
-	Prompt `yaml:",inline"`
-
-	// ResolvedPromptFile is populated by Load (see resolve.go) as the
-	// absolute path of Prompt.File resolved against the registry root.
-	// Empty when the entry uses Prompt.Text instead.
 	ResolvedPromptFile string `yaml:"-"`
 }
 

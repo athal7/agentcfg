@@ -631,7 +631,6 @@ func TestCapabilities_OnlyDeclaresWhatIsBuilt(t *testing.T) {
 		render.CapProjectModelPolicy:        true,
 		render.CapCustomCommands:            true,
 		render.CapStructuredWorkflowCommand: true,
-		render.CapHarnessPromptSuffix:       true,
 	}
 	got := New().Capabilities()
 	if len(got) != len(want) {
@@ -887,58 +886,5 @@ func TestRender_ExtraSettingsCommandsEmittedSortedExcludingToolsApproval(t *test
 	}
 	if count != 1 {
 		t.Errorf("got %d tools.approval RunCommands, want exactly 1", count)
-	}
-}
-
-// TestRender_HarnessPromptAppendsExtraContentForPrimaryAndDelegate covers
-// issue-class gap #2: omp's primary (via APPEND_SYSTEM.md) and any
-// delegate subagent can each carry omp-specific additional prompt content
-// beyond the shared Prompt every harness gets.
-func TestRender_HarnessPromptAppendsExtraContentForPrimaryAndDelegate(t *testing.T) {
-	reg := &registry.Registry{
-		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
-		Bash:         baseBashPolicy(),
-		Agents: []registry.Agent{
-			{
-				Name:   "lead",
-				Role:   "primary",
-				Class:  "default",
-				Prompt: registry.Prompt{Text: "base lead prompt"},
-				HarnessPrompts: map[string]registry.HarnessPrompt{
-					"omp": {Prompt: registry.Prompt{Text: "omp delegation guidance"}},
-				},
-			},
-			{
-				Name:   "build",
-				Role:   "delegate",
-				Class:  "default",
-				Prompt: registry.Prompt{Text: "base build prompt"},
-				HarnessPrompts: map[string]registry.HarnessPrompt{
-					"omp": {Prompt: registry.Prompt{Text: "omp build extra"}},
-				},
-			},
-		},
-	}
-
-	plan, err := New().Render(reg, render.Options{})
-	if err != nil {
-		t.Fatalf("Render returned error: %v", err)
-	}
-
-	for _, o := range plan.Outputs {
-		if wf, ok := o.(render.WriteFile); ok && wf.Path == appendSystemPath {
-			want := "base lead prompt\n\nomp delegation guidance"
-			if string(wf.Content) != want {
-				t.Errorf("got APPEND_SYSTEM.md %q, want %q", wf.Content, want)
-			}
-		}
-	}
-
-	dir := outputByType[render.RebuildDir](t, plan.Outputs)
-	if len(dir.Files) != 1 || dir.Files[0].Path != "build.md" {
-		t.Fatalf("got files %+v, want exactly build.md", dir.Files)
-	}
-	if !strings.Contains(string(dir.Files[0].Content), "base build prompt\n\nomp build extra") {
-		t.Errorf("got build.md content %q, want it to contain the harness_prompts extra", dir.Files[0].Content)
 	}
 }

@@ -648,38 +648,3 @@ func TestRender_HarnessExtraRejectsReservedPermissionLeaf(t *testing.T) {
 		t.Fatal("expected an error for extra permission.bash colliding with Render's own leaf, got nil")
 	}
 }
-
-// TestRender_HarnessPromptAppendsExtraContentForOpencode covers
-// Agent.HarnessPrompts["opencode"]: since opencode's prompt field can't
-// hold both a "{file:...}" reference and inline extra text, the renderer
-// must resolve and concatenate both into one literal string instead of
-// emitting the usual file reference.
-func TestRender_HarnessPromptAppendsExtraContentForOpencode(t *testing.T) {
-	reg := &registry.Registry{
-		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
-		Bash:         baseBashPolicy(),
-		Agents: []registry.Agent{
-			{
-				Name:   "lead",
-				Role:   "primary",
-				Class:  "default",
-				Prompt: registry.Prompt{Text: "base prompt"},
-				HarnessPrompts: map[string]registry.HarnessPrompt{
-					"opencode": {Prompt: registry.Prompt{Text: "opencode extra"}},
-				},
-			},
-		},
-	}
-
-	plan, err := New().Render(reg, render.Options{})
-	if err != nil {
-		t.Fatalf("Render returned error: %v", err)
-	}
-
-	out := plan.Outputs[0].(render.MergeJSON)
-	prompt := out.Object["agent"].(map[string]any)["lead"].(map[string]any)["prompt"]
-	want := "base prompt\n\nopencode extra"
-	if prompt != want {
-		t.Errorf("got prompt %q, want %q", prompt, want)
-	}
-}

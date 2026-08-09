@@ -65,14 +65,6 @@ const (
 	// internal/render/commands.go's workflowzDirective and
 	// athal7/agentcfg#3.
 	CapStructuredWorkflowCommand Capability = "structured_workflow_command"
-
-	// CapHarnessPromptSuffix marks support for Agent.HarnessPrompts: a
-	// renderer that declares this appends its own id's entry (if any)
-	// after the agent's shared Prompt when rendering that agent's prompt
-	// body/reference. A renderer without this capability would silently
-	// drop the extra content for any agent that both targets it and sets
-	// harness_prompts[<that renderer's id>] — see DetectGaps.
-	CapHarnessPromptSuffix Capability = "harness_prompt_suffix"
 )
 
 // capabilitySubstitutePairs lists every pair of capabilities that express

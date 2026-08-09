@@ -91,7 +91,6 @@ func (renderer) Capabilities() []render.Capability {
 		render.CapProjectModelPolicy,
 		render.CapCustomCommands,
 		render.CapStructuredWorkflowCommand,
-		render.CapHarnessPromptSuffix,
 	}
 }
 
@@ -318,37 +317,17 @@ func renderAgentFile(a registry.Agent, serversByName map[string]registry.MCPServ
 	return b.String()
 }
 
-// promptBody resolves an agent's full prompt body: the shared Prompt,
-// followed by its harness_prompts["omp"] entry (if any), separated by a
-// blank line — see Agent.HarnessPrompts.
+// promptBody reads a file-backed prompt's content, or returns an inline
+// prompt's text as-is.
 func promptBody(a registry.Agent, readFile func(string) ([]byte, error)) (string, error) {
-	base, err := promptText(a.ResolvedPromptFile, a.Prompt.Text, readFile)
-	if err != nil {
-		return "", err
+	if a.ResolvedPromptFile != "" {
+		data, err := readFile(a.ResolvedPromptFile)
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
 	}
-	extra, ok := a.HarnessPrompts[id]
-	if !ok {
-		return base, nil
-	}
-	extraText, err := promptText(extra.ResolvedPromptFile, extra.Prompt.Text, readFile)
-	if err != nil {
-		return "", err
-	}
-	return base + "\n\n" + extraText, nil
-}
-
-// promptText resolves a Prompt's literal text: file content when
-// resolvedFile is set, the inline text otherwise. Prompt validation
-// already guarantees exactly one of the two is non-empty.
-func promptText(resolvedFile, text string, readFile func(string) ([]byte, error)) (string, error) {
-	if resolvedFile == "" {
-		return text, nil
-	}
-	data, err := readFile(resolvedFile)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
+	return a.Prompt.Text, nil
 }
 
 // targets reports whether an omitted/empty targets list (meaning "every

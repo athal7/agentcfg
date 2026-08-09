@@ -61,7 +61,6 @@ func (renderer) Capabilities() []render.Capability {
 		render.CapMCPPerToolAsk,
 		render.CapProjectModelPolicy,
 		render.CapCustomCommands,
-		render.CapHarnessPromptSuffix,
 	}
 }
 
@@ -108,7 +107,7 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 
 	agentsObj := map[string]any{}
 	for _, a := range reg.Agents {
-		agentObj, err := renderAgent(reg, a, readFile)
+		agentObj, err := renderAgent(reg, a)
 		if err != nil {
 			return nil, err
 		}
@@ -294,7 +293,7 @@ func agentBashMap(reg *registry.Registry, b registry.BashPermission) (map[string
 // renderAgent builds the opencode agent object for a single registry.Agent,
 // including its permission block (bash from agentBashMap, task/edit/write
 // from Permissions, external_directory, and MCP tool/ask settings).
-func renderAgent(reg *registry.Registry, a registry.Agent, readFile func(string) ([]byte, error)) (map[string]any, error) {
+func renderAgent(reg *registry.Registry, a registry.Agent) (map[string]any, error) {
 	bashMap, err := agentBashMap(reg, a.Permissions.Bash)
 	if err != nil {
 		return nil, fmt.Errorf("opencode: agent %q: %w", a.Name, err)
@@ -328,15 +327,11 @@ func renderAgent(reg *registry.Registry, a registry.Agent, readFile func(string)
 	if a.Role == "primary" {
 		opencodeMode = "primary"
 	}
-	prompt, err := renderPrompt(a, readFile)
-	if err != nil {
-		return nil, fmt.Errorf("opencode: agent %q: %w", a.Name, err)
-	}
 	agentObj := map[string]any{
 		"description": a.Description,
 		"mode":        opencodeMode,
 		"model":       reg.ModelClasses[a.Class],
-		"prompt":      prompt,
+		"prompt":      renderPrompt(a),
 		"permission":  perm,
 	}
 	if len(tools) > 0 {
@@ -349,44 +344,12 @@ func renderAgent(reg *registry.Registry, a registry.Agent, readFile func(string)
 }
 
 // renderPrompt returns opencode's "{file:...}" load-at-runtime reference
-// for a file-backed prompt, or the literal text for an inline prompt. When
-// the agent declares harness_prompts["opencode"], the extra content can't
-// be expressed as a second file reference in the same JSON string field,
-// so both parts are resolved to their literal text and concatenated
-// instead — the one case where this renderer reads a prompt file at
-// render time rather than deferring to opencode's own runtime load.
-func renderPrompt(a registry.Agent, readFile func(string) ([]byte, error)) (string, error) {
-	extra, ok := a.HarnessPrompts[id]
-	if !ok {
-		if a.ResolvedPromptFile != "" {
-			return fmt.Sprintf("{file:%s}", a.ResolvedPromptFile), nil
-		}
-		return a.Prompt.Text, nil
+// for a file-backed prompt, or the literal text for an inline prompt.
+func renderPrompt(a registry.Agent) string {
+	if a.ResolvedPromptFile != "" {
+		return fmt.Sprintf("{file:%s}", a.ResolvedPromptFile)
 	}
-
-	base, err := promptText(a.ResolvedPromptFile, a.Prompt.Text, readFile)
-	if err != nil {
-		return "", fmt.Errorf("prompt: %w", err)
-	}
-	extraText, err := promptText(extra.ResolvedPromptFile, extra.Prompt.Text, readFile)
-	if err != nil {
-		return "", fmt.Errorf("harness_prompts[%q]: %w", id, err)
-	}
-	return base + "\n\n" + extraText, nil
-}
-
-// promptText resolves a Prompt's literal text: file content when
-// resolvedFile is set, the inline text otherwise. Prompt validation
-// already guarantees exactly one of the two is non-empty.
-func promptText(resolvedFile, text string, readFile func(string) ([]byte, error)) (string, error) {
-	if resolvedFile == "" {
-		return text, nil
-	}
-	data, err := readFile(resolvedFile)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
+	return a.Prompt.Text
 }
 
 // renderMCPServer resolves one mcp_servers entry into opencode's native mcp

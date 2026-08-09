@@ -323,7 +323,6 @@ the target-specific compilation mechanism — see [Role](#role) below:
 | `Steps` | `steps` | `*int` | optional step budget; only some renderers can express this (see `docs/capabilities.md`) |
 | `Permissions` | `permissions` | object | see below |
 | `MCP` | `mcp` | `[]AgentMCP` | which MCP servers this step may use |
-| `HarnessPrompts` | `harness_prompts` | `map[string]HarnessPrompt` | additional prompt content appended after `Prompt`, keyed by target renderer id — see [`harness_prompts:`](#harness_prompts) below |
 
 `Prompt`:
 
@@ -390,41 +389,6 @@ should apply when it works directly or dispatches a `task` (a
 build/implementer or plan/architect persona) rather than a specialized,
 independently dispatchable tool (research, browser QA, etc.) — the
 latter should use `role: delegate`.
-
-### `harness_prompts:`
-
-```yaml
-workflow:
-  steps:
-    - name: lead
-      role: primary
-      class: default
-      prompt:
-        file: prompts/lead.md
-      harness_prompts:
-        omp:
-          file: prompts/lead-omp.md
-```
-
-A step's `prompt:` is shared across every harness it targets — one body,
-compiled identically everywhere. `harness_prompts:` is the escape hatch
-for a step that's genuinely the same *role* on every harness but needs
-harness-specific *framing* on top: omp's primary gets full session
-control (edit/write allowed, delegation is a choice, not an enforced
-boundary), while opencode's lead typically has `permissions.edit: deny`
-and `permissions.write: deny` — the extra guidance that makes sense for
-omp's primary ("you may edit directly, but prefer dispatching build for
-non-trivial changes") would be actively wrong advice on opencode's lead,
-which can't edit at all.
-
-Each entry is a `HarnessPrompt` — the same shape as `Prompt` (exactly one
-of `file` or `text`) — keyed by the target renderer's id (`opencode`,
-`omp`). A renderer appends its own id's entry, if any, after the
-resolved `Prompt` body, separated by a blank line; a renderer with no
-matching entry (or a step with no `harness_prompts:` at all) renders
-`Prompt` alone, unchanged. Every current renderer declares
-`harness_prompt_suffix` (see `docs/capabilities.md`), so this never
-silently drops content on `opencode` or `omp` today.
 
 ## `mcp_servers:`
 
@@ -664,8 +628,6 @@ command (non-zero exit) and anything in "warnings" is printed but doesn't:
 - an agent with no `class`, or a `class` not present in `model_classes`
 - an agent whose `prompt` sets neither or both of `file`/`text`, or whose
   `prompt.file` doesn't exist on disk
-- an agent's `harness_prompts` entry that sets neither or both of
-  `file`/`text`, or whose `prompt.file` doesn't exist on disk
 - an agent's `permissions.bash.profile` naming a profile that doesn't
   exist, or a bare `permissions.bash` decision that isn't `allow`/`deny`
 - an agent's `permissions.external_directory` value that isn't

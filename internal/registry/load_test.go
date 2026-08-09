@@ -536,6 +536,25 @@ workflow:
 	}
 }
 
+func TestValidate_ReservedPlanNameAllowedWhenTargetsExcludeOmp(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+workflow:
+  steps:
+    - name: lead
+      role: primary
+      class: default
+      prompt: { text: "a" }
+    - name: plan
+      role: delegate
+      class: default
+      targets: [opencode]
+      prompt: { text: "b" }
+`
+	_, errs, warns, err := loadFixture(t, files)
+	requireNoProblems(t, errs, warns, err)
+}
+
 func TestValidate_AgentUnknownClass(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `

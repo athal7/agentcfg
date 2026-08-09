@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 // Validate checks a merged Registry for schema and consistency problems.
@@ -49,6 +50,14 @@ func isValidDecision(d Decision) bool {
 	return d == Allow || d == Deny || d == Ask
 }
 
+// targetsOmp reports whether an empty/omitted targets list ("every
+// harness") or an explicit list naming "omp" applies to omp's renderer.
+// Mirrors internal/render/omp's own unexported targets() helper — kept
+// duplicated rather than shared to avoid registry importing render.
+func targetsOmp(list []string) bool {
+	return len(list) == 0 || slices.Contains(list, "omp")
+}
+
 // validateAgents reports errors in the registry's workflow steps.
 func validateAgents(reg *Registry) []ValidationError {
 	var errs []ValidationError
@@ -84,8 +93,12 @@ func validateAgents(reg *Registry) []ValidationError {
 			// model-role name and interactive plan-mode toggle. Only a
 			// role: delegate step is ever dispatched by name as a
 			// standalone omp agent file — a primary or advisory step
-			// never reaches that dispatch path (see agentcfg#14).
-			if a.Name == "plan" {
+			// never reaches that dispatch path (see agentcfg#14). Scoped
+			// to steps that actually target omp (empty Targets means
+			// every harness): a step with targets: [opencode] never
+			// reaches omp's dispatch path either, so the name is safe
+			// there regardless of role.
+			if a.Name == "plan" && targetsOmp(a.Targets) {
 				errs = append(errs, ValidationError{
 					Message: `agent name "plan" collides with omp's native plan-mode machinery and will hang when dispatched — see agentcfg#14`,
 				})

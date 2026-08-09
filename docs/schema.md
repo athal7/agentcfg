@@ -377,12 +377,16 @@ renderer's native primitive:
   that doesn't declare `compose_into_primary` (opencode) renders the
   step exactly as if it were unset — a normal standalone subagent.
 - **`delegate`** — independently dispatchable, full permissions as
-  declared. A standalone agent file on every harness. Only a `delegate`
-  step is ever dispatched by name as a standalone omp agent file, so
-  `agentcfg validate` rejects `name: plan` for this role specifically —
-  it collides with omp's own reserved plan-mode name and hangs when
-  dispatched (a `primary` or `advisory` step named `plan` is never
-  dispatched by name on omp, so the collision can't occur for them).
+  declared. A standalone agent file on every harness the step targets.
+  Only a `delegate` step is ever dispatched by name as a standalone omp
+  agent file, so `agentcfg validate` rejects `name: plan` for this role
+  when the step's `targets` includes (or omits, meaning "every
+  harness") `omp` — it collides with omp's own reserved plan-mode name
+  and hangs when dispatched. A `delegate` step named `plan` with
+  `targets: [opencode]` never reaches omp's dispatch path, so the
+  collision can't occur and the name is allowed (a `primary` or
+  `advisory` step named `plan` is likewise never dispatched by name on
+  omp, so the check doesn't apply to those roles regardless of targets).
 
 `role: advisory` is meant for steps whose job is discipline the primary
 should apply when it works directly or dispatches a `task` (a
@@ -623,8 +627,9 @@ command (non-zero exit) and anything in "warnings" is printed but doesn't:
   and `permissions.write: deny`
 - a `role: advisory` step when the registry has no `role: primary` step
   (nothing to compose into)
-- a `role: delegate` step named `plan` (collides with omp's reserved
-  plan-mode name — see [Role](#role))
+- a `role: delegate` step named `plan` whose `targets` includes (or
+  omits) `omp` (collides with omp's reserved plan-mode name — see
+  [Role](#role))
 - an agent with no `class`, or a `class` not present in `model_classes`
 - an agent whose `prompt` sets neither or both of `file`/`text`, or whose
   `prompt.file` doesn't exist on disk

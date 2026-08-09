@@ -746,6 +746,17 @@ command (non-zero exit) and anything in "warnings" is printed but doesn't:
   a workflow step, minus `role`
 - a step's `opencode.agent` that's empty, or that names an entry not
   present in `opencode_agents`
+- a plain (non-`opencode:`-overridden) step whose own `name` collides
+  with an `opencode_agents` persona that some other step's `opencode:`
+  actually references — both would render to the same `opencode.json`
+  `agent.<name>` key, one silently overwriting the other. An unreferenced
+  persona sharing a name with a plain step is fine: it never renders, so
+  there's no key to collide with
+- two or more steps referencing the same `opencode_agents` persona whose
+  effective `role: primary` vs. non-primary, or `steps:` budget, disagree
+  — the renderer resolves a shared persona's `mode`/`steps` from the
+  first referencing step in declaration order, so a later, incompatible
+  reference would silently lose its own configuration instead of erroring
 - an agent with no `class`, or a `class` not present in `model_classes`
 - an agent whose `prompt` sets neither or both of `file`/`text`, or whose
   `prompt.file` doesn't exist on disk

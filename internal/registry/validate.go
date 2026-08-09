@@ -59,6 +59,17 @@ func targetsOmp(list []string) bool {
 	return len(list) == 0 || slices.Contains(list, "omp")
 }
 
+// stepsEqual reports whether two *int step-budget values are equal:
+// both nil, or both non-nil with the same dereferenced value. Used to
+// compare an Agent.Steps budget across multiple steps sharing one
+// opencode_agents persona.
+func stepsEqual(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
 // validateAgents reports errors in the registry's workflow steps.
 func validateAgents(reg *Registry) []ValidationError {
 	var errs []ValidationError
@@ -77,6 +88,28 @@ func validateAgents(reg *Registry) []ValidationError {
 		}
 	}
 
+	// referencedOpencodeAgents tracks which opencode_agents personas are
+	// actually pointed at by at least one step — needed below to reject
+	// a plain (non-overridden) step whose own Name would collide with a
+	// persona's rendered opencode.json agent.<name> key. An unreferenced
+	// persona sharing a name with a plain step is fine: it never
+	// renders, so there's no key for the plain step to collide with.
+	// firstOpencodeRef records the first (in Agents declaration order —
+	// the same order the opencode renderer resolves mode/steps from) step
+	// to reference each persona, so every later reference can be checked
+	// against it for the compatible-references check below.
+	referencedOpencodeAgents := map[string]bool{}
+	firstOpencodeRef := map[string]Agent{}
+	for _, a := range reg.Agents {
+		if a.Opencode == nil || a.Opencode.Agent == "" {
+			continue
+		}
+		referencedOpencodeAgents[a.Opencode.Agent] = true
+		if _, ok := firstOpencodeRef[a.Opencode.Agent]; !ok {
+			firstOpencodeRef[a.Opencode.Agent] = a
+		}
+	}
+
 	for _, a := range reg.Agents {
 		if a.Name == "" {
 			errs = append(errs, ValidationError{Message: "agent has no name"})
@@ -84,6 +117,12 @@ func validateAgents(reg *Registry) []ValidationError {
 			errs = append(errs, ValidationError{Message: fmt.Sprintf("duplicate agent name %q", a.Name)})
 		} else {
 			seenNames[a.Name] = true
+		}
+
+		if a.Opencode == nil && referencedOpencodeAgents[a.Name] {
+			errs = append(errs, ValidationError{
+				Message: fmt.Sprintf("agent %q renders as opencode agent key %q, which collides with a referenced opencode_agents persona of the same name — rename one of them", a.Name, a.Name),
+			})
 		}
 
 		switch a.Role {
@@ -160,6 +199,10 @@ func validateAgents(reg *Registry) []ValidationError {
 			} else if !opencodeAgentNames[a.Opencode.Agent] {
 				errs = append(errs, ValidationError{
 					Message: fmt.Sprintf("agent %q references unknown opencode agent %q (not declared under opencode_agents)", a.Name, a.Opencode.Agent),
+				})
+			} else if first := firstOpencodeRef[a.Opencode.Agent]; (a.Role == "primary") != (first.Role == "primary") || !stepsEqual(a.Steps, first.Steps) {
+				errs = append(errs, ValidationError{
+					Message: fmt.Sprintf("agent %q references opencode agent %q with a different effective mode or steps budget than agent %q — every step sharing one opencode_agents persona must agree on role: primary vs. non-primary and on steps:", a.Name, a.Opencode.Agent, first.Name),
 				})
 			}
 		}

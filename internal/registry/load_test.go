@@ -333,6 +333,183 @@ harnesses:
 	}
 }
 
+func TestValidate_OpencodeAgentReferenceMustExist(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+workflow:
+  steps:
+    - name: lead
+      role: primary
+      class: default
+      prompt: { text: "a" }
+    - name: verify
+      role: delegate
+      class: default
+      opencode: { agent: qa }
+      prompt: { text: "b" }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `agent "verify" references unknown opencode agent "qa"`) {
+		t.Errorf("errs = %v, want unknown-opencode-agent-reference error", errs)
+	}
+}
+
+func TestValidate_OpencodeAgentsValidatedLikeAgents(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+workflow:
+  steps:
+    - name: lead
+      role: primary
+      class: default
+      prompt: { text: "a" }
+opencode_agents:
+  - name: qa
+    class: nonexistent
+    prompt: { text: "b" }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `opencode agent "qa" references unknown model class "nonexistent"`) {
+		t.Errorf("errs = %v, want unknown-class error for the opencode agent", errs)
+	}
+}
+
+// TestValidate_PlainStepNameCollidesWithReferencedOpencodeAgent covers a
+// CodeRabbit-flagged bug: a plain (non-overridden) step renders as
+// opencode.json's agent.<name>, and a referenced opencode_agents persona
+// renders at agent.<persona name> — if both share a name, one silently
+// overwrites the other in the rendered agent map. Must be rejected.
+func TestValidate_PlainStepNameCollidesWithReferencedOpencodeAgent(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+workflow:
+  steps:
+    - name: lead
+      role: primary
+      class: default
+      prompt: { text: "a" }
+    - name: qa
+      role: delegate
+      class: default
+      prompt: { text: "a plain step, not opencode-overridden" }
+    - name: verify
+      role: delegate
+      class: default
+      opencode: { agent: qa }
+      prompt: { text: "b" }
+opencode_agents:
+  - name: qa
+    class: default
+    prompt: { text: "the qa persona" }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `agent "qa" renders as opencode agent key "qa", which collides with a referenced opencode_agents persona`) {
+		t.Errorf("errs = %v, want a rendered-key-collision error", errs)
+	}
+}
+
+// TestValidate_UnreferencedOpencodeAgentSameNameAsPlainStepIsFine is the
+// negative case for the collision check above: an opencode_agents entry
+// that shares a name with a plain step but is never referenced by any
+// step never actually renders, so there's no key for the plain step to
+// collide with.
+func TestValidate_UnreferencedOpencodeAgentSameNameAsPlainStepIsFine(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+workflow:
+  steps:
+    - name: lead
+      role: primary
+      class: default
+      prompt: { text: "a" }
+    - name: qa
+      role: delegate
+      class: default
+      prompt: { text: "a plain step" }
+opencode_agents:
+  - name: qa
+    class: default
+    prompt: { text: "never referenced by any step" }
+`
+	_, errs, warns, err := loadFixture(t, files)
+	requireNoProblems(t, errs, warns, err)
+}
+
+// TestValidate_SharedOpencodePersonaRequiresCompatibleReferences covers
+// the second CodeRabbit-flagged bug: the opencode renderer resolves a
+// shared persona's mode/steps from the FIRST referencing step, so a
+// later reference with a different effective role: primary vs.
+// non-primary (or a different steps: budget) would silently lose its
+// own configuration. Must be rejected at validation time instead.
+func TestValidate_SharedOpencodePersonaRequiresCompatibleReferences(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+workflow:
+  steps:
+    - name: orchestrate
+      role: primary
+      class: default
+      opencode: { agent: lead }
+      prompt: { text: "a" }
+    - name: implement
+      role: delegate
+      class: default
+      opencode: { agent: lead }
+      prompt: { text: "b" }
+opencode_agents:
+  - name: lead
+    class: default
+    prompt: { text: "the lead persona" }
+`
+	_, errs, _, err := loadFixture(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !anyErrorContains(errs, `agent "implement" references opencode agent "lead" with a different effective mode or steps budget than agent "orchestrate"`) {
+		t.Errorf("errs = %v, want an incompatible-shared-persona-reference error", errs)
+	}
+}
+
+// TestValidate_SharedOpencodePersonaWithCompatibleReferencesIsFine is the
+// positive case: two delegate steps, neither primary, agreeing on
+// (unset) steps:, sharing one persona — no error.
+func TestValidate_SharedOpencodePersonaWithCompatibleReferencesIsFine(t *testing.T) {
+	files := minimalFixtureFiles()
+	files["agents.yaml"] = `
+workflow:
+  steps:
+    - name: lead
+      role: primary
+      class: default
+      prompt: { text: "a" }
+    - name: verify
+      role: delegate
+      class: default
+      opencode: { agent: qa }
+      prompt: { text: "b" }
+    - name: research
+      role: delegate
+      class: default
+      opencode: { agent: qa }
+      prompt: { text: "c" }
+opencode_agents:
+  - name: qa
+    class: default
+    prompt: { text: "the qa persona" }
+`
+	_, errs, warns, err := loadFixture(t, files)
+	requireNoProblems(t, errs, warns, err)
+}
+
 func TestLoad_ZeroMatchGlobImportSilentWhenParentDirAbsent(t *testing.T) {
 	// The common case: an optional split-file convention (bash.d/*.yaml)
 	// that a registry never opted into. No directory exists at all, so

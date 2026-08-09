@@ -553,3 +553,140 @@ func TestID(t *testing.T) {
 		t.Errorf("got ID %q, want opencode", got)
 	}
 }
+
+// TestRender_HarnessExtraMergesIntoOpencodeJSON covers harnesses.opencode.
+// extra fully owning opencode.json's static, non-registry-modeled keys
+// (server, plugin, provider, formatter, lsp) alongside the permission
+// leaves this renderer doesn't otherwise manage (grep/glob/lsp/websearch),
+// without disturbing the permission leaves it does (bash).
+func TestRender_HarnessExtraMergesIntoOpencodeJSON(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Harnesses: map[string]registry.HarnessConfig{
+			"opencode": {
+				Extra: map[string]any{
+					"server":                     map[string]any{"hostname": "127.0.0.1"},
+					"permission.grep":            "allow",
+					"permission.glob":            "allow",
+					"permission.lsp":             "allow",
+					"permission.webfetch_unused": "allow",
+				},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	if len(plan.Gaps) != 0 {
+		t.Fatalf("got %d gaps, want 0: %+v", len(plan.Gaps), plan.Gaps)
+	}
+
+	out := plan.Outputs[0].(render.MergeJSON)
+	server, ok := out.Object["server"].(map[string]any)
+	if !ok || server["hostname"] != "127.0.0.1" {
+		t.Errorf("got server %#v, want hostname 127.0.0.1", out.Object["server"])
+	}
+
+	perm := out.Object["permission"].(map[string]any)
+	if perm["grep"] != "allow" || perm["glob"] != "allow" || perm["lsp"] != "allow" {
+		t.Errorf("got permission %#v, want grep/glob/lsp allow from extra", perm)
+	}
+	if _, ok := perm["bash"]; !ok {
+		t.Errorf("got permission %#v, want Render's own bash leaf to survive alongside extra's leaves", perm)
+	}
+
+	for _, want := range []string{"server", "permission.grep", "permission.glob", "permission.lsp", "permission.webfetch_unused"} {
+		found := false
+		for _, m := range out.Managed {
+			if m == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Managed %v missing extra path %q", out.Managed, want)
+		}
+	}
+}
+
+// TestRender_HarnessExtraRejectsReservedTopLevelKey covers the collision
+// guard: an extra key naming a top-level key Render always manages itself
+// (e.g. "agent") must fail loudly rather than let the two writers race.
+func TestRender_HarnessExtraRejectsReservedTopLevelKey(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Harnesses: map[string]registry.HarnessConfig{
+			"opencode": {Extra: map[string]any{"agent": map[string]any{}}},
+		},
+	}
+
+	_, err := New().Render(reg, render.Options{})
+	if err == nil {
+		t.Fatal("expected an error for an extra key colliding with a Render-managed key, got nil")
+	}
+}
+
+// TestRender_HarnessExtraRejectsReservedPermissionLeaf covers the
+// finer-grained collision guard on "permission.<leaf>" paths: a leaf
+// Render already manages (e.g. "bash") must be rejected the same way a
+// top-level collision is.
+func TestRender_HarnessExtraRejectsReservedPermissionLeaf(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Harnesses: map[string]registry.HarnessConfig{
+			"opencode": {Extra: map[string]any{"permission.bash": map[string]any{}}},
+		},
+	}
+
+	_, err := New().Render(reg, render.Options{})
+	if err == nil {
+		t.Fatal("expected an error for extra permission.bash colliding with Render's own leaf, got nil")
+	}
+}
+
+// TestRender_HarnessExtraRejectsNestedPermissionPath covers a validation
+// bypass: "permission.read.foo" must not slip past the reserved-leaf
+// check by having its leaf computed as "read.foo" (which doesn't match
+// the reserved "read" entry) — nested permission paths are rejected
+// outright, since setDottedPath would otherwise replace Render's
+// permission.read scalar with an object.
+func TestRender_HarnessExtraRejectsNestedPermissionPath(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Harnesses: map[string]registry.HarnessConfig{
+			"opencode": {Extra: map[string]any{"permission.read.foo": "allow"}},
+		},
+	}
+
+	_, err := New().Render(reg, render.Options{})
+	if err == nil {
+		t.Fatal("expected an error for a nested permission.read.foo extra key, got nil")
+	}
+}
+
+// TestRender_HarnessExtraRejectsEmptyPathSegments covers malformed dotted
+// keys ("", ".tools", "tools.", "tools..foo") that would otherwise let
+// setDottedPath write empty-string object keys into opencode.json instead
+// of failing loudly on invalid harness configuration.
+func TestRender_HarnessExtraRejectsEmptyPathSegments(t *testing.T) {
+	for _, key := range []string{"", ".tools", "tools.", "tools..foo"} {
+		t.Run(key, func(t *testing.T) {
+			reg := &registry.Registry{
+				ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+				Bash:         baseBashPolicy(),
+				Harnesses: map[string]registry.HarnessConfig{
+					"opencode": {Extra: map[string]any{key: "x"}},
+				},
+			}
+			if _, err := New().Render(reg, render.Options{}); err == nil {
+				t.Fatalf("expected an error for extra key %q, got nil", key)
+			}
+		})
+	}
+}

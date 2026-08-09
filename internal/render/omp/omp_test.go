@@ -1,8 +1,10 @@
 package omp
 
 import (
+	"encoding/json"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/athal7/agentcfg/internal/registry"
@@ -155,10 +157,10 @@ func TestRender_LeadAndBuildProducesFourOutputs(t *testing.T) {
 }
 
 // TestRender_GapsForUndeclaredCapabilities covers the gaps omp deliberately
-// leaves to DetectGaps: agent_steps, per_agent_bash_policy, mcp_tool_globs.
-// Fixture (b)-equivalent from the phase 2 task spec (external_directory
-// isn't included: the registry schema has no field for it — see
-// gaps.go's schema note).
+// leaves to DetectGaps: agent_steps, per_agent_bash_policy. Fixture
+// (b)-equivalent from the phase 2 task spec (external_directory isn't
+// included: the registry schema has no field for it — see gaps.go's
+// schema note).
 func TestRender_GapsForUndeclaredCapabilities(t *testing.T) {
 	steps := 7
 	reg := &registry.Registry{
@@ -204,8 +206,12 @@ func TestRender_GapsForUndeclaredCapabilities(t *testing.T) {
 	if len(byCapability[render.CapPerAgentBashPolicy]) != 1 {
 		t.Errorf("got %d per_agent_bash_policy gaps, want 1: %+v", len(byCapability[render.CapPerAgentBashPolicy]), byCapability[render.CapPerAgentBashPolicy])
 	}
-	if len(byCapability[render.CapMCPToolGlobs]) != 1 {
-		t.Errorf("got %d mcp_tool_globs gaps, want 1: %+v", len(byCapability[render.CapMCPToolGlobs]), byCapability[render.CapMCPToolGlobs])
+	// mcp_tool_globs must NOT gap: omp declares CapMCPToolGlobs and
+	// actually consumes MCPServer.Tools (subagent frontmatter grants,
+	// tools.approval) — the github server's Tools allowlist above is
+	// fully expressed, not dropped.
+	if len(byCapability[render.CapMCPToolGlobs]) != 0 {
+		t.Errorf("got %d mcp_tool_globs gaps, want 0 (omp supports tool globs): %+v", len(byCapability[render.CapMCPToolGlobs]), byCapability[render.CapMCPToolGlobs])
 	}
 	// primary_agent must NOT gap: omp declares CapPromptAppend, the
 	// documented substitute mechanism.
@@ -342,14 +348,13 @@ func TestRender_RemoteTransportFailureGap(t *testing.T) {
 	}
 }
 
-// TestRender_TransportFailureAndToolGlobsBothGapOnSameServer covers a
-// server that is doubly-affected: its Tools allowlist can never be
-// expressed (omp has no CapMCPToolGlobs) AND its URL fails to resolve
-// (a CapMCPRemoteTransport failure). Both gaps must surface independently
-// for the same server — DetectGaps' structural tool-globs scan runs
-// unconditionally before the per-server resolve loop, so a resolver
-// failure must not swallow the tool-globs gap or vice versa.
-func TestRender_TransportFailureAndToolGlobsBothGapOnSameServer(t *testing.T) {
+// TestRender_TransportFailureDoesNotAlsoGapToolGlobs covers a server
+// that fails transport resolution (a CapMCPRemoteTransport failure) while
+// also declaring a Tools allowlist: since omp declares CapMCPToolGlobs
+// and genuinely consumes MCPServer.Tools, the allowlist itself is never
+// a gap here regardless of the unrelated resolve failure — only the
+// transport gap should surface for this server.
+func TestRender_TransportFailureDoesNotAlsoGapToolGlobs(t *testing.T) {
 	reg := &registry.Registry{
 		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
 		Bash:         baseBashPolicy(),
@@ -383,8 +388,8 @@ func TestRender_TransportFailureAndToolGlobsBothGapOnSameServer(t *testing.T) {
 	if !haveTransport {
 		t.Errorf("expected a mcp_remote_transport gap for mcp:broken-slack, got %+v", plan.Gaps)
 	}
-	if !haveToolGlobs {
-		t.Errorf("expected a mcp_tool_globs gap for mcp:broken-slack, got %+v", plan.Gaps)
+	if haveToolGlobs {
+		t.Errorf("expected no mcp_tool_globs gap for mcp:broken-slack (omp supports tool globs), got %+v", plan.Gaps)
 	}
 
 	mcp := outputByType[render.MergeJSON](t, plan.Outputs)
@@ -622,6 +627,7 @@ func TestCapabilities_OnlyDeclaresWhatIsBuilt(t *testing.T) {
 		render.CapGlobalBashPolicy:          true,
 		render.CapMCPLocalTransport:         true,
 		render.CapMCPRemoteTransport:        true,
+		render.CapMCPToolGlobs:              true,
 		render.CapProjectModelPolicy:        true,
 		render.CapCustomCommands:            true,
 		render.CapStructuredWorkflowCommand: true,
@@ -670,5 +676,260 @@ func TestRender_CommandsRenderAsSkillFiles(t *testing.T) {
 func TestID(t *testing.T) {
 	if got := New().ID(); got != "omp" {
 		t.Errorf("got ID %q, want omp", got)
+	}
+}
+
+// findRunCommand returns the RunCommand among outputs whose `omp config
+// set <key> <value>` Argv names key, failing the test if none match.
+func findRunCommand(t *testing.T, outputs []render.Output, key string) render.RunCommand {
+	t.Helper()
+	for _, o := range outputs {
+		cmd, ok := o.(render.RunCommand)
+		if !ok || len(cmd.Argv) < 4 {
+			continue
+		}
+		if cmd.Argv[3] == key {
+			return cmd
+		}
+	}
+	t.Fatalf("no RunCommand for omp config set %q found among %d outputs", key, len(outputs))
+	panic("unreachable")
+}
+
+// TestRenderAgentFile_GrantsMCPToolIDsFromAgentMCP covers issue-class gap
+// #1: an agent's mcp: entry must expand to the referenced server's Tools
+// allowlist as explicit mcp__<server>_<tool> ids in the subagent's
+// frontmatter tools: list — omp's tools: list is a hard visibility
+// allowlist, not just an approval gate, so leaving these out would make
+// the tools uncallable regardless of tools.approval.
+func TestRenderAgentFile_GrantsMCPToolIDsFromAgentMCP(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{
+				Name:   "atlassian",
+				Role:   "delegate",
+				Class:  "default",
+				Prompt: registry.Prompt{Text: "You reach Atlassian."},
+				MCP:    []registry.AgentMCP{{Server: "runlayer-atlassian"}},
+			},
+		},
+		MCPServers: []registry.MCPServer{
+			{
+				Name:      "runlayer-atlassian",
+				Transport: "remote",
+				URL:       registry.Value{Literal: "https://example.invalid/mcp"},
+				Tools:     []string{"getJiraIssue", "search"},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	dir := outputByType[render.RebuildDir](t, plan.Outputs)
+	if len(dir.Files) != 1 {
+		t.Fatalf("got %d agent files, want 1", len(dir.Files))
+	}
+	content := string(dir.Files[0].Content)
+	for _, want := range []string{"mcp__runlayer_atlassian_getjiraissue", "mcp__runlayer_atlassian_search"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("agent file tools: line missing %q, got:\n%s", want, content)
+		}
+	}
+}
+
+// TestRenderAgentFile_Context7ToolIDsUseContextPrefix covers the one
+// documented naming exception: omp addresses context7 internally as
+// "context", not "context7".
+func TestRenderAgentFile_Context7ToolIDsUseContextPrefix(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{
+				Name:   "scout",
+				Role:   "delegate",
+				Class:  "default",
+				Prompt: registry.Prompt{Text: "You research."},
+				MCP:    []registry.AgentMCP{{Server: "context7"}},
+			},
+		},
+		MCPServers: []registry.MCPServer{
+			{Name: "context7", Transport: "remote", URL: registry.Value{Literal: "https://mcp.context7.com/mcp"}, Tools: []string{"query-docs"}},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	dir := outputByType[render.RebuildDir](t, plan.Outputs)
+	content := string(dir.Files[0].Content)
+	if !strings.Contains(content, "mcp__context_query_docs") {
+		t.Errorf("agent file tools: line missing mcp__context_query_docs (context7 -> context prefix), got:\n%s", content)
+	}
+	if strings.Contains(content, "mcp__context7_") {
+		t.Errorf("agent file tools: line must not use the raw context7 prefix, got:\n%s", content)
+	}
+}
+
+// TestRender_ToolsApprovalCommandDerivedFromMCPServersAndExtra covers
+// tools.approval: every configured server's Tools ids get "allow", merged
+// with any static entries under harnesses.omp.extra["tools.approval"]
+// (e.g. omp's own built-in write/edit/task/bash tools).
+func TestRender_ToolsApprovalCommandDerivedFromMCPServersAndExtra(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Harnesses: map[string]registry.HarnessConfig{
+			"omp": {Extra: map[string]any{
+				"tools.approval": map[string]any{"write": "allow", "task": "allow"},
+			}},
+		},
+		MCPServers: []registry.MCPServer{
+			{Name: "github", Transport: "remote", URL: registry.Value{Literal: "https://example.invalid"}, Tools: []string{"search_code"}},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	cmd := findRunCommand(t, plan.Outputs, "tools.approval")
+	var approval map[string]string
+	if err := json.Unmarshal([]byte(cmd.Argv[4]), &approval); err != nil {
+		t.Fatalf("unmarshaling tools.approval JSON: %v", err)
+	}
+	want := map[string]string{"mcp__github_search_code": "allow", "write": "allow", "task": "allow"}
+	if !reflect.DeepEqual(approval, want) {
+		t.Errorf("got tools.approval %#v, want %#v", approval, want)
+	}
+}
+
+// TestRender_ToolsApprovalCommandAbsentWhenNothingToSet covers the no-op
+// case: no MCP servers and no harnesses.omp.extra["tools.approval"] means
+// Render must not emit an empty `omp config set tools.approval '{}'` call.
+func TestRender_ToolsApprovalCommandAbsentWhenNothingToSet(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	for _, o := range plan.Outputs {
+		if cmd, ok := o.(render.RunCommand); ok && len(cmd.Argv) >= 4 && cmd.Argv[3] == "tools.approval" {
+			t.Fatalf("got a tools.approval RunCommand %v, want none", cmd.Argv)
+		}
+	}
+}
+
+// TestRender_ExtraSettingsCommandsEmittedSortedExcludingToolsApproval
+// covers harnesses.omp.extra's generic pass-through: every entry besides
+// "tools.approval" becomes its own `omp config set <key> <json>` call,
+// in sorted key order for a deterministic Plan.
+func TestRender_ExtraSettingsCommandsEmittedSortedExcludingToolsApproval(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Harnesses: map[string]registry.HarnessConfig{
+			"omp": {Extra: map[string]any{
+				"tools.approvalMode":  "always-ask",
+				"task.disabledAgents": []any{"reviewer", "security-reviewer"},
+				"compaction.strategy": "context-full",
+				"tools.approval":      map[string]any{"write": "allow"},
+			}},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	// Scalar strings are passed bare (unquoted) — confirmed empirically,
+	// omp's CLI rejects a JSON-quoted string as not matching its own
+	// unquoted enum values (e.g. `"always-ask"` fails, `always-ask`
+	// works).
+	modeCmd := findRunCommand(t, plan.Outputs, "tools.approvalMode")
+	if modeCmd.Argv[4] != "always-ask" {
+		t.Errorf("got tools.approvalMode value %q, want unquoted %q", modeCmd.Argv[4], "always-ask")
+	}
+	stratCmd := findRunCommand(t, plan.Outputs, "compaction.strategy")
+	if stratCmd.Argv[4] != "context-full" {
+		t.Errorf("got compaction.strategy value %q, want unquoted %q", stratCmd.Argv[4], "context-full")
+	}
+	disabledCmd := findRunCommand(t, plan.Outputs, "task.disabledAgents")
+	var disabled []string
+	if err := json.Unmarshal([]byte(disabledCmd.Argv[4]), &disabled); err != nil {
+		t.Fatalf("unmarshaling task.disabledAgents JSON: %v", err)
+	}
+	if !reflect.DeepEqual(disabled, []string{"reviewer", "security-reviewer"}) {
+		t.Errorf("got task.disabledAgents %v, want [reviewer security-reviewer]", disabled)
+	}
+
+	// "tools.approval" must be handled once, by renderToolsApprovalCommand
+	// — not duplicated here as a second, unmerged RunCommand.
+	count := 0
+	for _, o := range plan.Outputs {
+		if cmd, ok := o.(render.RunCommand); ok && len(cmd.Argv) >= 4 && cmd.Argv[3] == "tools.approval" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("got %d tools.approval RunCommands, want exactly 1", count)
+	}
+}
+
+// TestRenderAgentFile_ExcludesToolIDsFromServerNotTargetingOmp covers a
+// real gap: an MCP server scoped to a different renderer (targets:
+// [opencode]) must not leak into an omp agent's frontmatter tools: list
+// — that server is absent from omp's mcp.json and tools.approval, so
+// granting its tool ids in frontmatter would let an agent "see" tools it
+// can never actually reach.
+func TestRenderAgentFile_ExcludesToolIDsFromServerNotTargetingOmp(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{
+				Name:   "github",
+				Role:   "delegate",
+				Class:  "default",
+				Prompt: registry.Prompt{Text: "You reach GitHub."},
+				MCP:    []registry.AgentMCP{{Server: "github"}},
+			},
+		},
+		MCPServers: []registry.MCPServer{
+			{
+				Name:      "github",
+				Transport: "remote",
+				URL:       registry.Value{Literal: "https://api.githubcopilot.com/mcp/"},
+				Tools:     []string{"search_code"},
+				Targets:   []string{"opencode"},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	dir := outputByType[render.RebuildDir](t, plan.Outputs)
+	if len(dir.Files) != 1 {
+		t.Fatalf("got %d agent files, want 1", len(dir.Files))
+	}
+	content := string(dir.Files[0].Content)
+	if strings.Contains(content, "mcp__github_search_code") {
+		t.Errorf("agent file tools: line must not grant mcp__github_search_code (server targets opencode only), got:\n%s", content)
 	}
 }

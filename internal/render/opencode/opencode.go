@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/athal7/agentcfg/internal/bashpolicy"
 	"github.com/athal7/agentcfg/internal/registry"
@@ -62,12 +64,31 @@ func (renderer) Capabilities() []render.Capability {
 	}
 }
 
+// reservedTopLevelKeys are the opencode.json top-level keys Render always
+// manages itself. harnesses.opencode.extra must not redeclare any of
+// them, or the two writers would silently fight over the same key on
+// every apply — the exact failure mode this renderer was built to avoid
+// (see the harness_prompts/extra design note in docs/schema.md).
+var reservedTopLevelKeys = map[string]bool{
+	"default_agent": true,
+	"agent":         true,
+	"tools":         true,
+	"mcp":           true,
+	"model":         true,
+	"small_model":   true,
+}
+
 // Render produces a Plan that merges the registry into opencode's native
 // opencode.json, covering model classes, agents, permissions, MCP tools,
-// and MCP server configuration.
+// MCP server configuration, and any harnesses.opencode.extra passthrough.
 func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Plan, error) {
 	plan := &render.Plan{}
 	plan.Gaps = append(plan.Gaps, render.DetectGaps(reg, r.Capabilities())...)
+
+	readFile := opt.ReadFile
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
 
 	globalBash, err := bashpolicy.Compile(reg.Bash, globalBashProfile)
 	if err != nil {
@@ -115,6 +136,12 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 	managed := []string{"default_agent", "agent", "tools", "mcp", "model", "small_model"}
 	managed = append(managed, managedPermissionPaths()...)
 
+	extraManaged, err := applyExtra(obj, reg.Harnesses[id].Extra)
+	if err != nil {
+		return nil, err
+	}
+	managed = append(managed, extraManaged...)
+
 	plan.Outputs = append(plan.Outputs, render.MergeJSON{
 		Path:    configPath,
 		Mode:    0600,
@@ -122,10 +149,6 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 		Object:  obj,
 	})
 
-	readFile := opt.ReadFile
-	if readFile == nil {
-		readFile = os.ReadFile
-	}
 	commandsTree, err := render.RenderCommands(reg, readFile)
 	if err != nil {
 		return nil, fmt.Errorf("opencode: rendering commands: %w", err)
@@ -133,6 +156,69 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 	plan.Outputs = append(plan.Outputs, commandsTree)
 
 	return plan, nil
+}
+
+// applyExtra splices harnesses.opencode.extra into obj, returning the
+// dotted paths it added so the caller can mark them Managed. Each key is
+// a dotted JSON path (e.g. "server", "permission.grep"): a single-segment
+// key is a full top-level subtree replace; a dotted key descends into
+// (creating, if absent) intermediate objects and replaces only the final
+// leaf, so "permission.grep" merges alongside the permission leaves this
+// renderer already owns (managedPermissionPaths) rather than clobbering
+// them. Keys colliding with a reservedTopLevelKeys entry, or a
+// permission leaf Render already manages, are rejected — the registry
+// author must not declare the same key twice under two different
+// mechanisms.
+func applyExtra(obj map[string]any, extra map[string]any) ([]string, error) {
+	if len(extra) == 0 {
+		return nil, nil
+	}
+
+	reservedPermissionLeaves := map[string]bool{"bash": true}
+	for _, leaf := range permissionKey {
+		reservedPermissionLeaves[leaf] = true
+	}
+
+	managed := make([]string, 0, len(extra))
+	for key, value := range extra {
+		if key == "" || strings.HasPrefix(key, ".") || strings.HasSuffix(key, ".") || strings.Contains(key, "..") {
+			return nil, fmt.Errorf("opencode: harnesses.opencode.extra key %q must contain non-empty JSON path segments", key)
+		}
+		root, suffix, dotted := strings.Cut(key, ".")
+		if reservedTopLevelKeys[root] {
+			return nil, fmt.Errorf("opencode: harnesses.opencode.extra key %q collides with a key Render already manages", key)
+		}
+		if root == "permission" {
+			leaf, _, nested := strings.Cut(suffix, ".")
+			if !dotted || leaf == "" || nested {
+				return nil, fmt.Errorf(`opencode: harnesses.opencode.extra key %q must be "permission.<leaf>" (Render already owns the bare "permission" object)`, key)
+			}
+			if reservedPermissionLeaves[leaf] {
+				return nil, fmt.Errorf("opencode: harnesses.opencode.extra key %q collides with a permission leaf Render already manages", key)
+			}
+		}
+		setDottedPath(obj, key, value)
+		managed = append(managed, key)
+	}
+	sort.Strings(managed)
+	return managed, nil
+}
+
+// setDottedPath sets value at a dotted path within obj, creating any
+// missing intermediate objects along the way. A key with no dot is a
+// direct top-level assignment.
+func setDottedPath(obj map[string]any, dotted string, value any) {
+	segments := strings.Split(dotted, ".")
+	cur := obj
+	for _, seg := range segments[:len(segments)-1] {
+		next, ok := cur[seg].(map[string]any)
+		if !ok {
+			next = map[string]any{}
+			cur[seg] = next
+		}
+		cur = next
+	}
+	cur[segments[len(segments)-1]] = value
 }
 
 // projectConfigPath is a literal, non-"~" path relative to the resolved

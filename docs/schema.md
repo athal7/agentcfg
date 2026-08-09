@@ -102,6 +102,7 @@ A map from harness/renderer ID (`opencode`, `omp`) to a `HarnessConfig`:
 | `Out` | `out` | string | (currently informational; renderers hardcode their own output paths — see `docs/capabilities.md` for what each renderer actually writes) |
 | `AgentsDir` | `agents_dir` | string | (currently informational, same caveat as `out`) |
 | `BashProfile` | `bash_profile` | string | which bash profile `agentcfg explain bash` treats as this harness's relevant profile (defaults to `"global"` if unset) |
+| `Extra` | `extra` | `map[string]any` | harness-native configuration the registry model has no dedicated field for — see [`extra:`](#extra) below |
 
 **Known asymmetry, documented rather than hidden:** both renderers
 currently compile the hardcoded profile named `"global"` when actually
@@ -111,6 +112,64 @@ here is read by `agentcfg explain bash` (and only that command) to decide
 which profile's resolution to display for a given target. A registry must
 always define a `"global"` bash profile for `render`/`apply`/`doctor` to
 work at all (`agentcfg init` scaffolds one for you).
+
+### `extra:`
+
+```yaml
+harnesses:
+  opencode:
+    out: ~/.config/opencode/opencode.json
+    extra:
+      server: { hostname: 127.0.0.1 }
+      plugin: ["opencode-permission-log"]
+      permission:
+        grep: allow
+        glob: allow
+      provider:
+        anthropic: { models: { claude-opus-5: { options: { thinking: { type: adaptive } } } } }
+  omp:
+    agents_dir: ~/.omp/agent/agents
+    bash_profile: global
+    extra:
+      tools.approvalMode: always-ask
+      task.disabledAgents: ["reviewer", "security-reviewer"]
+      compaction.strategy: context-full
+```
+
+`extra` lets a harness own configuration surface agentcfg's registry
+model has no dedicated field for — server/plugin/provider/formatter
+blocks on opencode, one-off `omp config set` keys on omp — without
+splitting that surface across a renderer-managed merge and a separately
+hand-authored file or script that fights over the same target on every
+apply. Interpretation is renderer-specific:
+
+- **opencode** treats each key as a JSON path merged into `opencode.json`
+  alongside its own managed keys. A single-segment key (`server`,
+  `plugin`, `provider`, `formatter`, `lsp`, ...) is a full top-level
+  subtree replace. A dotted key (`permission.grep`) descends into
+  (creating, if absent) intermediate objects and replaces only the final
+  leaf — this is how `extra` can add permission leaves opencode has no
+  registry-level concept for (`grep`/`glob`/`lsp`/`websearch`) without
+  clobbering the leaves agentcfg itself manages (`bash`, and one per
+  `Permissions` field). A key colliding with a key Render always manages
+  itself (`agent`, `tools`, `mcp`, `model`, `small_model`,
+  `default_agent`, or a `permission.<leaf>` agentcfg already owns) is a
+  hard `render`/`apply` error — declaring the same key under two
+  mechanisms is always a bug, never a valid two-writer setup.
+- **omp** treats each key as a dotted `omp config set <key> <json value>`
+  call — e.g. `tools.approvalMode: always-ask` becomes
+  `omp config set tools.approvalMode '"always-ask"'`. One key,
+  `tools.approval`, is handled specially: agentcfg first derives an
+  `"allow"` entry per MCP tool id from every configured server's `tools:`
+  allowlist (the same ids a step's `mcp:` grant expands to in its
+  frontmatter — see [`mcp_servers:`](#mcp_servers)), then layers
+  `extra["tools.approval"]`'s entries on top (e.g. omp's own built-in
+  `write`/`edit`/`task`/`bash` tools, which the registry declares rather
+  than agentcfg opining on) before emitting one merged `omp config set`
+  call.
+
+`extra` is per-harness and entirely optional; a registry that never sets
+it changes nothing about how that harness renders.
 
 ## `model_classes:`
 

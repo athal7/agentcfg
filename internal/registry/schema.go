@@ -54,6 +54,18 @@ type HarnessConfig struct {
 	Out         string `yaml:"out,omitempty"`
 	AgentsDir   string `yaml:"agents_dir,omitempty"`
 	BashProfile string `yaml:"bash_profile,omitempty"`
+
+	// Extra declares harness-native configuration agentcfg's registry
+	// model has no dedicated field for, so the harness owns its config
+	// surface outright instead of splitting it across a renderer-managed
+	// merge and a hand-authored file/script fighting over the same
+	// target. Interpretation is renderer-specific: opencode treats each
+	// key as a (possibly dotted, e.g. "permission.grep") JSON path merged
+	// into opencode.json alongside its own managed keys; omp treats each
+	// key as a dotted `omp config set <key> <json value>` call. Nil/empty
+	// means the harness gets only what the registry model itself
+	// expresses — no behavior change for a registry that never sets it.
+	Extra map[string]any `yaml:"extra,omitempty"`
 }
 
 // BashPolicy is the content of bash.yaml (merged with bash.d/*.yaml).

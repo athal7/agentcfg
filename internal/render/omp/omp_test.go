@@ -856,13 +856,17 @@ func TestRender_ExtraSettingsCommandsEmittedSortedExcludingToolsApproval(t *test
 		t.Fatalf("Render returned error: %v", err)
 	}
 
+	// Scalar strings are passed bare (unquoted) — confirmed empirically,
+	// omp's CLI rejects a JSON-quoted string as not matching its own
+	// unquoted enum values (e.g. `"always-ask"` fails, `always-ask`
+	// works).
 	modeCmd := findRunCommand(t, plan.Outputs, "tools.approvalMode")
-	if modeCmd.Argv[4] != `"always-ask"` {
-		t.Errorf("got tools.approvalMode value %s, want %q", modeCmd.Argv[4], `"always-ask"`)
+	if modeCmd.Argv[4] != "always-ask" {
+		t.Errorf("got tools.approvalMode value %q, want unquoted %q", modeCmd.Argv[4], "always-ask")
 	}
 	stratCmd := findRunCommand(t, plan.Outputs, "compaction.strategy")
-	if stratCmd.Argv[4] != `"context-full"` {
-		t.Errorf("got compaction.strategy value %s, want %q", stratCmd.Argv[4], `"context-full"`)
+	if stratCmd.Argv[4] != "context-full" {
+		t.Errorf("got compaction.strategy value %q, want unquoted %q", stratCmd.Argv[4], "context-full")
 	}
 	disabledCmd := findRunCommand(t, plan.Outputs, "task.disabledAgents")
 	var disabled []string

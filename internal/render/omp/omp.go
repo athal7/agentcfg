@@ -447,7 +447,7 @@ func renderToolsApprovalCommand(reg *registry.Registry) (render.RunCommand, bool
 	}, true, nil
 }
 
-// renderExtraSettingsCommands emits one `omp config set <key> <json>` per
+// renderExtraSettingsCommands emits one `omp config set <key> <value>` per
 // harnesses.omp.extra entry, except "tools.approval" — that key is
 // already handled by renderToolsApprovalCommand, which merges it with the
 // registry-derived MCP tool grants rather than setting it verbatim.
@@ -469,16 +469,33 @@ func renderExtraSettingsCommands(reg *registry.Registry) ([]render.RunCommand, e
 
 	cmds := make([]render.RunCommand, 0, len(keys))
 	for _, k := range keys {
-		valueJSON, err := json.Marshal(extra[k])
+		valueArg, err := configSetArg(extra[k])
 		if err != nil {
-			return nil, fmt.Errorf("omp: marshaling harnesses.omp.extra[%q]: %w", k, err)
+			return nil, fmt.Errorf("omp: harnesses.omp.extra[%q]: %w", k, err)
 		}
 		cmds = append(cmds, render.RunCommand{
-			Argv: []string{"omp", "config", "set", k, string(valueJSON)},
+			Argv: []string{"omp", "config", "set", k, valueArg},
 			Why:  fmt.Sprintf("sync omp setting %q from harnesses.omp.extra", k),
 		})
 	}
 	return cmds, nil
+}
+
+// configSetArg formats a harnesses.omp.extra value as `omp config set`
+// expects it: a bare (unquoted) literal for a scalar string — confirmed
+// empirically, omp's CLI parses a JSON-quoted string like `"always-ask"`
+// as not matching its own unquoted enum values and rejects it — and JSON
+// encoding for anything else (array, object, number, bool), which omp's
+// CLI does expect JSON-encoded.
+func configSetArg(v any) (string, error) {
+	if s, ok := v.(string); ok {
+		return s, nil
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return "", fmt.Errorf("marshaling value: %w", err)
+	}
+	return string(data), nil
 }
 
 // renderMCPServer resolves one mcp_servers entry into omp's native mcp.json

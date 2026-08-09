@@ -34,5 +34,9 @@ release:
   github:
     owner: athal7
     name: agentcfg
+  # release-please creates the GitHub release (tag + changelog) before
+  # this runs; goreleaser's job here is only to attach build artifacts
+  # to that existing release, not to write its own notes over it.
+  mode: keep-existing
 
 

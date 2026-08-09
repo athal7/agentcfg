@@ -616,6 +616,165 @@ func TestRender_AdvisoryWithoutPrimaryFallsBackToStandaloneFile(t *testing.T) {
 	}
 }
 
+// TestRender_OpencodeOverrideStepRendersNothingForOmp covers a workflow
+// step whose Opencode field names a standing OpencodeAgent persona: omp
+// has no such concept, so the step must render nothing at all — no
+// standalone agent file, no APPEND_SYSTEM.md composition — regardless of
+// its own Role (delegate here) or Targets (unset, meaning "every
+// harness", including omp).
+func TestRender_OpencodeOverrideStepRendersNothingForOmp(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{Name: "lead", Role: "primary", Class: "default", Prompt: registry.Prompt{Text: "You are the lead."}},
+			{
+				Name:     "verify",
+				Role:     "delegate",
+				Class:    "default",
+				Prompt:   registry.Prompt{Text: "Verify the change."},
+				Opencode: &registry.StepOpencode{Agent: "qa"},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	rebuild := outputByType[render.RebuildDir](t, plan.Outputs)
+	if len(rebuild.Files) != 0 {
+		t.Errorf("got %d standalone agent files, want 0 (opencode-override step must not render): %+v", len(rebuild.Files), rebuild.Files)
+	}
+
+	appendFile := outputByType[render.WriteFile](t, plan.Outputs)
+	if appendFile.Path != appendSystemPath {
+		t.Fatalf("got path %q, want %q", appendFile.Path, appendSystemPath)
+	}
+	want := "You are the lead."
+	if string(appendFile.Content) != want {
+		t.Errorf("got APPEND_SYSTEM.md content %q, want %q (opencode-override step must not appear)", appendFile.Content, want)
+	}
+}
+
+// TestRender_OpencodeOverrideAdvisoryStepExcludedFromComposedSections
+// covers an advisory step whose Opencode field names a standing
+// OpencodeAgent persona: before this change role: advisory plus a
+// primary present would have spliced it into APPEND_SYSTEM.md (see
+// TestRender_ComposeIntoPrimarySplicesIntoAppendSystem); with Opencode
+// set it must be excluded entirely, leaving only the primary's own body.
+func TestRender_OpencodeOverrideAdvisoryStepExcludedFromComposedSections(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{Name: "lead", Role: "primary", Class: "default", Prompt: registry.Prompt{Text: "You are the lead."}},
+			{
+				Name:        "review",
+				Role:        "advisory",
+				Class:       "default",
+				Description: "Reviews before shipping",
+				Prompt:      registry.Prompt{Text: "Review the change."},
+				Opencode:    &registry.StepOpencode{Agent: "qa"},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	rebuild := outputByType[render.RebuildDir](t, plan.Outputs)
+	if len(rebuild.Files) != 0 {
+		t.Errorf("got %d standalone agent files, want 0: %+v", len(rebuild.Files), rebuild.Files)
+	}
+
+	appendFile := outputByType[render.WriteFile](t, plan.Outputs)
+	want := "You are the lead."
+	if string(appendFile.Content) != want {
+		t.Errorf("got APPEND_SYSTEM.md content %q, want %q (opencode-override advisory step must not compose)", appendFile.Content, want)
+	}
+}
+
+// TestRender_OpencodeOverridePrimaryWritesNoAppendSystem covers the
+// primary step itself having Opencode set (e.g. workflow.yaml.tmpl's
+// "orchestrate" step, compiled to opencode's "lead" persona): its own
+// prompt is opencode-only and must not leak into APPEND_SYSTEM.md via
+// Render's separate primary-body path (renderAgentFiles/composedSections
+// alone don't cover this — Render reads the primary's prompt directly).
+// With no advisory steps to compose either, nothing is left to write, so
+// no WriteFile output should be produced at all.
+func TestRender_OpencodeOverridePrimaryWritesNoAppendSystem(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{
+				Name:     "orchestrate",
+				Role:     "primary",
+				Class:    "default",
+				Prompt:   registry.Prompt{Text: "Compiles to opencode's lead persona."},
+				Opencode: &registry.StepOpencode{Agent: "lead"},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	for _, o := range plan.Outputs {
+		if wf, ok := o.(render.WriteFile); ok {
+			t.Errorf("got a WriteFile output %+v, want none (opencode-overridden primary with no advisory steps has nothing to write)", wf)
+		}
+	}
+}
+
+// TestRender_OpencodeNilStepsRenderUnchanged is a non-regression check
+// for the Opencode-override skip added to renderAgentFiles and
+// composedSections: a step with Opencode left nil (every step before
+// Agent.Opencode existed) must render exactly as before — a delegate
+// step still gets its own standalone file, and an advisory step still
+// composes into APPEND_SYSTEM.md when a primary exists. Adapted from
+// TestRender_ComposeIntoPrimarySplicesIntoAppendSystem with an added
+// delegate step.
+func TestRender_OpencodeNilStepsRenderUnchanged(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{Name: "lead", Role: "primary", Class: "default", Prompt: registry.Prompt{Text: "You are the lead."}},
+			{
+				Name:        "plan",
+				Role:        "advisory",
+				Class:       "default",
+				Description: "Architects before implementing",
+				Prompt:      registry.Prompt{Text: "Research before coding."},
+			},
+			{Name: "build", Role: "delegate", Class: "default", Prompt: registry.Prompt{Text: "You build things."}},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	rebuild := outputByType[render.RebuildDir](t, plan.Outputs)
+	if len(rebuild.Files) != 1 || rebuild.Files[0].Path != "build.md" {
+		t.Fatalf("got files %+v, want exactly one build.md standalone file", rebuild.Files)
+	}
+
+	appendFile := outputByType[render.WriteFile](t, plan.Outputs)
+	want := "You are the lead.\n\n## plan: Architects before implementing\n\nResearch before coding."
+	if string(appendFile.Content) != want {
+		t.Errorf("got APPEND_SYSTEM.md content:\n%s\nwant:\n%s", appendFile.Content, want)
+	}
+}
+
 func TestCapabilities_OnlyDeclaresWhatIsBuilt(t *testing.T) {
 	want := map[render.Capability]bool{
 		render.CapAgentDefinitions:          true,

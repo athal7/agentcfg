@@ -45,6 +45,17 @@ func resolvePromptPaths(reg *Registry) {
 		}
 	}
 
+	for i := range reg.OpencodeAgents {
+		if reg.OpencodeAgents[i].Prompt.File == "" {
+			continue
+		}
+		violates, resolved := promptFileTraversal(reg.RootDir, rootReal, reg.OpencodeAgents[i].Prompt.File)
+		if violates {
+			continue
+		}
+		reg.OpencodeAgents[i].ResolvedPromptFile = resolved
+	}
+
 	for i := range reg.Commands {
 		if reg.Commands[i].Prompt.File != "" {
 			violates, resolved := promptFileTraversal(reg.RootDir, rootReal, reg.Commands[i].Prompt.File)

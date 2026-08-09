@@ -17,6 +17,7 @@ func Validate(reg *Registry) ([]ValidationError, []ValidationWarning) {
 	errs = append(errs, validateModelClasses(reg)...)
 	errs = append(errs, validateAgents(reg)...)
 	warns = append(warns, validateAgentWarnings(reg)...)
+	errs = append(errs, validateOpencodeAgents(reg)...)
 	errs = append(errs, validateBash(reg)...)
 	errs = append(errs, validateMCPServers(reg)...)
 	errs = append(errs, validateContexts(reg)...)
@@ -69,6 +70,13 @@ func validateAgents(reg *Registry) []ValidationError {
 	primaryCount := 0
 	var advisorySteps []string
 
+	opencodeAgentNames := map[string]bool{}
+	for _, oa := range reg.OpencodeAgents {
+		if oa.Name != "" {
+			opencodeAgentNames[oa.Name] = true
+		}
+	}
+
 	for _, a := range reg.Agents {
 		if a.Name == "" {
 			errs = append(errs, ValidationError{Message: "agent has no name"})
@@ -95,10 +103,13 @@ func validateAgents(reg *Registry) []ValidationError {
 			// standalone omp agent file — a primary or advisory step
 			// never reaches that dispatch path (see agentcfg#14). Scoped
 			// to steps that actually target omp (empty Targets means
-			// every harness): a step with targets: [opencode] never
-			// reaches omp's dispatch path either, so the name is safe
-			// there regardless of role.
-			if a.Name == "plan" && targetsOmp(a.Targets) {
+			// every harness) AND aren't opencode-agent-overridden: a
+			// step with targets: [opencode], or one naming an Opencode
+			// persona (which renders nothing for omp regardless of
+			// Targets/Role — see Agent.Opencode), never reaches omp's
+			// dispatch path either, so the name is safe there
+			// regardless of role.
+			if a.Name == "plan" && targetsOmp(a.Targets) && a.Opencode == nil {
 				errs = append(errs, ValidationError{
 					Message: `agent name "plan" collides with omp's native plan-mode machinery and will hang when dispatched — see agentcfg#14`,
 				})
@@ -140,6 +151,18 @@ func validateAgents(reg *Registry) []ValidationError {
 				})
 			}
 		}
+
+		if a.Opencode != nil {
+			if a.Opencode.Agent == "" {
+				errs = append(errs, ValidationError{
+					Message: fmt.Sprintf("agent %q sets opencode: but its agent field is empty", a.Name),
+				})
+			} else if !opencodeAgentNames[a.Opencode.Agent] {
+				errs = append(errs, ValidationError{
+					Message: fmt.Sprintf("agent %q references unknown opencode agent %q (not declared under opencode_agents)", a.Name, a.Opencode.Agent),
+				})
+			}
+		}
 	}
 
 	if primaryCount > 1 {
@@ -174,6 +197,64 @@ func validateAgentWarnings(reg *Registry) []ValidationWarning {
 		})
 	}
 	return warns
+}
+
+// validateOpencodeAgents reports errors in the registry's opencode_agents
+// section — standing opencode personas referenced by name from workflow
+// steps via Agent.Opencode (see that field's doc comment). Validated the
+// same way as a workflow step's own name/class/prompt/bash/
+// external_directory fields, minus Role (opencode_agents has no role —
+// it's not a workflow step, just a rendering target one or more steps
+// point at).
+func validateOpencodeAgents(reg *Registry) []ValidationError {
+	var errs []ValidationError
+
+	rootReal, _ := filepath.EvalSymlinks(reg.RootDir)
+	seenNames := map[string]bool{}
+
+	for _, oa := range reg.OpencodeAgents {
+		if oa.Name == "" {
+			errs = append(errs, ValidationError{Message: "opencode agent has no name"})
+		} else if seenNames[oa.Name] {
+			errs = append(errs, ValidationError{Message: fmt.Sprintf("duplicate opencode agent name %q", oa.Name)})
+		} else {
+			seenNames[oa.Name] = true
+		}
+
+		if oa.Class == "" {
+			errs = append(errs, ValidationError{Message: fmt.Sprintf("opencode agent %q has no class", oa.Name)})
+		} else if _, ok := reg.ModelClasses[oa.Class]; !ok {
+			errs = append(errs, ValidationError{
+				Message: fmt.Sprintf("opencode agent %q references unknown model class %q", oa.Name, oa.Class),
+			})
+		}
+
+		errs = append(errs, validatePromptField(oa.Prompt, fmt.Sprintf("opencode agent %q", oa.Name), reg.RootDir, rootReal)...)
+
+		if !oa.Permissions.Bash.IsZero() {
+			if oa.Permissions.Bash.Profile != "" {
+				if _, ok := reg.Bash.Profiles[oa.Permissions.Bash.Profile]; !ok {
+					errs = append(errs, ValidationError{
+						Message: fmt.Sprintf("opencode agent %q references unknown bash profile %q", oa.Name, oa.Permissions.Bash.Profile),
+					})
+				}
+			} else if oa.Permissions.Bash.Decision != string(Allow) && oa.Permissions.Bash.Decision != string(Deny) {
+				errs = append(errs, ValidationError{
+					Message: fmt.Sprintf("opencode agent %q has invalid permissions.bash %q (must be allow or deny)", oa.Name, oa.Permissions.Bash.Decision),
+				})
+			}
+		}
+
+		for pattern, decision := range oa.Permissions.ExternalDirectory {
+			if !isValidDecision(decision) {
+				errs = append(errs, ValidationError{
+					Message: fmt.Sprintf("opencode agent %q permissions.external_directory pattern %q has invalid decision %q (must be allow, deny, or ask)", oa.Name, pattern, decision),
+				})
+			}
+		}
+	}
+
+	return errs
 }
 
 // validateBash reports errors in the registry's bash policy lists and profiles.

@@ -28,15 +28,16 @@ const (
 // Registry is the fully loaded, merged contents of an agentcfg registry
 // directory (agentcfg.yaml plus its imports and local.yaml).
 type Registry struct {
-	RootDir      string
-	Version      int
-	Harnesses    map[string]HarnessConfig
-	ModelClasses map[string]string
-	Bash         BashPolicy
-	Agents       []Agent
-	MCPServers   []MCPServer
-	Contexts     []Context
-	Commands     []Command
+	RootDir        string
+	Version        int
+	Harnesses      map[string]HarnessConfig
+	ModelClasses   map[string]string
+	Bash           BashPolicy
+	Agents         []Agent
+	OpencodeAgents []OpencodeAgent
+	MCPServers     []MCPServer
+	Contexts       []Context
+	Commands       []Command
 }
 
 // Workflow is the content of the top-level workflow: key — the registry's
@@ -164,6 +165,52 @@ type Agent struct {
 	// permissions as declared — a standalone agent on every harness).
 	// Defaults to "delegate" if omitted. See docs/schema.md.
 	Role string `yaml:"role,omitempty"`
+
+	// Opencode names which standing OpencodeAgent persona implements
+	// this step for opencode specifically. Nil means opencode compiles
+	// the step directly from its own Name/Prompt/Permissions/MCP/Class,
+	// same as every other renderer. When set, opencode instead renders
+	// the referenced OpencodeAgents entry (by its own Prompt/
+	// Permissions/MCP/Class — this step's own copies of those fields
+	// are unused for opencode's rendering), and every renderer other
+	// than opencode treats this step as opencode-only: omp has no
+	// standing "agent definition" concept, so a step naming an Opencode
+	// persona renders nothing for omp at all (no standalone agent file,
+	// no APPEND_SYSTEM.md composition), regardless of Targets/Role.
+	// This lets one Opencode persona (e.g. "qa") back multiple workflow
+	// steps, and keeps step-specific instructions (this step's own
+	// Prompt — portable, dynamically dispatchable on omp) separate from
+	// persona-level restriction/role framing (the OpencodeAgent's own
+	// Prompt — opencode-only, standing).
+	Opencode *StepOpencode `yaml:"opencode,omitempty"`
+
+	// ResolvedPromptFile is populated by Load (see resolve.go) as the
+	// absolute path of Prompt.File resolved against the registry root.
+	// Empty when the agent uses Prompt.Text instead.
+	ResolvedPromptFile string `yaml:"-"`
+}
+
+// StepOpencode is a workflow step's opencode-specific compilation
+// detail — see Agent.Opencode.
+type StepOpencode struct {
+	Agent string `yaml:"agent"`
+}
+
+// OpencodeAgent is a standing, reusable opencode agent persona: a name,
+// prompt, permissions, MCP grants, and model class, independent of any
+// specific workflow step. Referenced by name from a workflow step's
+// Agent.Opencode.Agent field — a workflow step describes *what
+// discipline a step needs*; an OpencodeAgent is the concrete, named,
+// restriction-bearing persona opencode's schema requires to express
+// that discipline, decoupled so the same persona can back more than one
+// step. Only ever rendered by opencode — omp has no equivalent concept.
+type OpencodeAgent struct {
+	Name        string      `yaml:"name"`
+	Description string      `yaml:"description,omitempty"`
+	Class       string      `yaml:"class"`
+	Prompt      Prompt      `yaml:"prompt"`
+	Permissions Permissions `yaml:"permissions,omitempty"`
+	MCP         []AgentMCP  `yaml:"mcp,omitempty"`
 
 	// ResolvedPromptFile is populated by Load (see resolve.go) as the
 	// absolute path of Prompt.File resolved against the registry root.
@@ -352,15 +399,16 @@ type ValidationWarning struct {
 // registry YAML file. A given file typically only populates a subset; the
 // loader uses presence (non-nil) to detect which keys a file declared.
 type fileContents struct {
-	Version      *int                     `yaml:"version"`
-	Imports      []string                 `yaml:"imports"`
-	Harnesses    map[string]HarnessConfig `yaml:"harnesses"`
-	ModelClasses map[string]string        `yaml:"model_classes"`
-	Bash         *BashPolicy              `yaml:"bash"`
-	Workflow     *Workflow                `yaml:"workflow"`
-	MCPServers   []MCPServer              `yaml:"mcp_servers"`
-	Contexts     []Context                `yaml:"contexts"`
-	Commands     []Command                `yaml:"commands"`
+	Version        *int                     `yaml:"version"`
+	Imports        []string                 `yaml:"imports"`
+	Harnesses      map[string]HarnessConfig `yaml:"harnesses"`
+	ModelClasses   map[string]string        `yaml:"model_classes"`
+	Bash           *BashPolicy              `yaml:"bash"`
+	Workflow       *Workflow                `yaml:"workflow"`
+	OpencodeAgents []OpencodeAgent          `yaml:"opencode_agents"`
+	MCPServers     []MCPServer              `yaml:"mcp_servers"`
+	Contexts       []Context                `yaml:"contexts"`
+	Commands       []Command                `yaml:"commands"`
 }
 
 // expandHome expands a leading ~ or ~/ to the current user's home directory.

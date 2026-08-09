@@ -102,11 +102,36 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 	}
 
 	if primary := render.PrimaryAgent(reg); primary != nil {
-		obj["default_agent"] = primary.Name
+		if primary.Opencode != nil {
+			if _, ok := findOpencodeAgent(reg, primary.Opencode.Agent); ok {
+				obj["default_agent"] = primary.Opencode.Agent
+			} else {
+				obj["default_agent"] = primary.Name
+			}
+		} else {
+			obj["default_agent"] = primary.Name
+		}
 	}
 
 	agentsObj := map[string]any{}
+	renderedOpencodeAgents := map[string]bool{}
 	for _, a := range reg.Agents {
+		if a.Opencode != nil {
+			if renderedOpencodeAgents[a.Opencode.Agent] {
+				continue
+			}
+			oa, ok := findOpencodeAgent(reg, a.Opencode.Agent)
+			if !ok {
+				continue
+			}
+			agentObj, err := renderOpencodeAgentPersona(reg, oa, a.Role, a.Steps)
+			if err != nil {
+				return nil, err
+			}
+			agentsObj[oa.Name] = agentObj
+			renderedOpencodeAgents[a.Opencode.Agent] = true
+			continue
+		}
 		agentObj, err := renderAgent(reg, a)
 		if err != nil {
 			return nil, err
@@ -354,6 +379,87 @@ func renderPrompt(a registry.Agent) string {
 		return fmt.Sprintf("{file:%s}", a.ResolvedPromptFile)
 	}
 	return a.Prompt.Text
+}
+
+// findOpencodeAgent looks up a standing OpencodeAgent persona by name.
+// registry.Validate already rejects a workflow step's Opencode.Agent
+// reference that doesn't name a real OpencodeAgents entry, but this
+// renderer stays defensive regardless — a lookup miss is a silent skip
+// (see the Opencode-override branch in Render), never a panic.
+func findOpencodeAgent(reg *registry.Registry, name string) (registry.OpencodeAgent, bool) {
+	for _, oa := range reg.OpencodeAgents {
+		if oa.Name == name {
+			return oa, true
+		}
+	}
+	return registry.OpencodeAgent{}, false
+}
+
+// renderOpencodeAgentPersona builds the opencode agent object for a
+// standing registry.OpencodeAgent persona — renderAgent's twin for a
+// workflow step that overrides opencode's compilation via Agent.Opencode.
+// Every field opencode can express (Description/Class/Prompt/
+// Permissions/MCP) comes from oa itself, never the referencing step; only
+// mode and steps come from the step's own role/steps, since those are
+// workflow-level concepts OpencodeAgent has no field for.
+func renderOpencodeAgentPersona(reg *registry.Registry, oa registry.OpencodeAgent, role string, steps *int) (map[string]any, error) {
+	bashMap, err := agentBashMap(reg, oa.Permissions.Bash)
+	if err != nil {
+		return nil, fmt.Errorf("opencode: agent %q: %w", oa.Name, err)
+	}
+
+	perm := map[string]any{
+		"bash": bashMapToAny(bashpolicy.AsMap(bashMap)),
+	}
+	if oa.Permissions.Task != "" {
+		perm["task"] = oa.Permissions.Task
+	}
+	if oa.Permissions.Edit != "" {
+		perm["edit"] = oa.Permissions.Edit
+	}
+	if oa.Permissions.Write != "" {
+		perm["write"] = oa.Permissions.Write
+	}
+	if len(oa.Permissions.ExternalDirectory) > 0 {
+		perm["external_directory"] = decisionMapToAny(oa.Permissions.ExternalDirectory)
+	}
+
+	tools := map[string]any{}
+	for _, m := range oa.MCP {
+		tools[m.Server+"_*"] = true
+		for _, pattern := range m.Ask {
+			perm[m.Server+"_"+pattern] = "ask"
+		}
+	}
+
+	opencodeMode := "subagent"
+	if role == "primary" {
+		opencodeMode = "primary"
+	}
+	agentObj := map[string]any{
+		"description": oa.Description,
+		"mode":        opencodeMode,
+		"model":       reg.ModelClasses[oa.Class],
+		"prompt":      renderOpencodeAgentPrompt(oa),
+		"permission":  perm,
+	}
+	if len(tools) > 0 {
+		agentObj["tools"] = tools
+	}
+	if steps != nil {
+		agentObj["steps"] = *steps
+	}
+	return agentObj, nil
+}
+
+// renderOpencodeAgentPrompt is renderPrompt's twin for a standing
+// OpencodeAgent persona: same "{file:...}"-vs-literal logic, reading the
+// persona's own ResolvedPromptFile/Prompt.Text instead of an Agent's.
+func renderOpencodeAgentPrompt(oa registry.OpencodeAgent) string {
+	if oa.ResolvedPromptFile != "" {
+		return fmt.Sprintf("{file:%s}", oa.ResolvedPromptFile)
+	}
+	return oa.Prompt.Text
 }
 
 // renderMCPServer resolves one mcp_servers entry into opencode's native mcp

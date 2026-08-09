@@ -323,6 +323,7 @@ the target-specific compilation mechanism — see [Role](#role) below:
 | `Steps` | `steps` | `*int` | optional step budget; only some renderers can express this (see `docs/capabilities.md`) |
 | `Permissions` | `permissions` | object | see below |
 | `MCP` | `mcp` | `[]AgentMCP` | which MCP servers this step may use |
+| `Opencode` | `opencode` | object | optional; names an `opencode_agents:` persona that renders this step for opencode instead of the step's own fields (see [Opencode](#opencode) below) |
 
 `Prompt`:
 
@@ -384,15 +385,121 @@ renderer's native primitive:
   harness") `omp` — it collides with omp's own reserved plan-mode name
   and hangs when dispatched. A `delegate` step named `plan` with
   `targets: [opencode]` never reaches omp's dispatch path, so the
-  collision can't occur and the name is allowed (a `primary` or
-  `advisory` step named `plan` is likewise never dispatched by name on
-  omp, so the check doesn't apply to those roles regardless of targets).
+  collision can't occur and the name is allowed; the same exemption
+  applies when the step sets [`opencode:`](#opencode) instead — such a
+  step renders nothing for omp regardless of `targets`, so the collision
+  is likewise impossible (a `primary` or `advisory` step named `plan` is
+  likewise never dispatched by name on omp, so the check doesn't apply
+  to those roles regardless of targets).
 
 `role: advisory` is meant for steps whose job is discipline the primary
 should apply when it works directly or dispatches a `task` (a
 build/implementer or plan/architect persona) rather than a specialized,
 independently dispatchable tool (research, browser QA, etc.) — the
 latter should use `role: delegate`.
+
+### `opencode`
+
+```yaml
+workflow:
+  steps:
+    - name: verify
+      role: delegate
+      class: default
+      opencode:
+        agent: qa
+      prompt:
+        text: "Drive the app in a browser and compare against the linked design."
+
+opencode_agents:
+  - name: qa
+    description: "Functional QA — read-only, verifies UI/behavior against a design."
+    class: default
+    permissions:
+      edit: deny
+      write: deny
+    prompt:
+      text: "You are qa. You never edit code — you verify and report back."
+```
+
+`opencode` is optional and, when set, names which standing
+[`opencode_agents:`](#opencode_agents) persona implements this step for
+opencode specifically. Omitted (the default) means opencode compiles the
+step directly from its own `name`/`prompt`/`permissions`/`mcp`/`class`
+fields, exactly as before this mechanism existed — a fully
+backward-compatible, opt-in escape hatch.
+
+When `opencode:` is set, opencode instead renders the referenced
+`opencode_agents:` entry — using *that* entry's own
+`prompt`/`permissions`/`mcp`/`class`, not this step's copies of those
+fields — keyed in `opencode.json`'s `agent:` map by the persona's `name`,
+not the step's `name`. The step's own `role` and `steps` (step budget)
+are still honored even when `opencode:` is set, since those are
+workflow-level concepts, not persona-level ones — `OpencodeAgent` has
+neither field.
+
+Every other renderer (currently just omp) treats a step with `opencode:`
+set as opencode-only: it renders **nothing** for that step at all — no
+standalone agent file, no `APPEND_SYSTEM.md`/compose-into-primary
+section — regardless of the step's own `targets:` or `role:`. omp has no
+standing named-agent-definition concept for this mechanism to target, so
+a step naming an opencode persona is skipped unconditionally.
+
+If two different steps reference the same `opencode_agents:` name,
+opencode renders that persona exactly once, deduplicated by agent name
+(first occurrence in `workflow.steps` order wins) — this is the
+mechanism's reason to exist: reusing one persona (e.g. a read-only `qa`
+reviewer) across more than one workflow step without duplicating its
+prompt/permissions/mcp on every referencing step.
+
+`StepOpencode`:
+
+| field | yaml tag | type | notes |
+|---|---|---|---|
+| `Agent` | `agent` | string | required when `opencode:` is set; must name an entry in `opencode_agents:` (validated — see [Validation summary](#validation-summary)) |
+
+## `opencode_agents:`
+
+```yaml
+opencode_agents:
+  - name: qa
+    description: "Functional QA — read-only, verifies UI/behavior against a design."
+    class: default
+    permissions:
+      edit: deny
+      write: deny
+    mcp:
+      - server: context7
+    prompt:
+      text: "You are qa. You never edit code — you verify and report back."
+```
+
+A standing, reusable opencode agent persona — name, prompt, permissions,
+MCP grants, model class — independent of any specific workflow step.
+Exists because opencode has no native workflow concept of its own:
+agentcfg has to give it real, named, restriction-bearing agent constructs
+to express a step's discipline, and a registry author may want the same
+persona (e.g. `qa`) to back more than one workflow step — decoupling
+persona identity from step identity (via [`opencode:`](#opencode)) lets
+that happen without duplicating the persona's prompt/permissions/mcp
+across every referencing step. Only ever rendered by opencode — every
+other renderer ignores `opencode_agents:` entirely, and an entry no
+step's `opencode:` references is simply never rendered.
+
+Each entry is an `OpencodeAgent`:
+
+| field | yaml tag | type | notes |
+|---|---|---|---|
+| `Name` | `name` | string | required, must be unique across `opencode_agents` |
+| `Description` | `description` | string | optional |
+| `Class` | `class` | string | required; must name a key present in `model_classes` |
+| `Prompt` | `prompt` | object | required; exactly one of `file` or `text`, same validation as a step's `prompt` |
+| `Permissions` | `permissions` | object | optional; same shape as a step's `permissions` (see [`workflow:`](#workflow)) |
+| `MCP` | `mcp` | `[]AgentMCP` | optional; which MCP servers this persona may use, same shape as a step's `mcp` |
+
+Validated like a workflow step minus `role` — an `OpencodeAgent` has no
+role, targets, or step budget of its own (see
+[Validation summary](#validation-summary)).
 
 ## `mcp_servers:`
 
@@ -628,8 +735,17 @@ command (non-zero exit) and anything in "warnings" is printed but doesn't:
 - a `role: advisory` step when the registry has no `role: primary` step
   (nothing to compose into)
 - a `role: delegate` step named `plan` whose `targets` includes (or
-  omits) `omp` (collides with omp's reserved plan-mode name — see
-  [Role](#role))
+  omits) `omp`, unless the step also sets `opencode:` (collides with
+  omp's reserved plan-mode name — see [Role](#role))
+- an `opencode_agents` entry with no `name`, a duplicate `name`, no
+  `class`, a `class` not present in `model_classes`, a `prompt` that
+  sets neither or both of `file`/`text` or whose `prompt.file` doesn't
+  exist on disk or escapes the registry root, an invalid
+  `permissions.bash.profile`/bare `permissions.bash` decision, or an
+  invalid `permissions.external_directory` decision — the same rules as
+  a workflow step, minus `role`
+- a step's `opencode.agent` that's empty, or that names an entry not
+  present in `opencode_agents`
 - an agent with no `class`, or a `class` not present in `model_classes`
 - an agent whose `prompt` sets neither or both of `file`/`text`, or whose
   `prompt.file` doesn't exist on disk

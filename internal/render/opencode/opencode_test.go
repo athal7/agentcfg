@@ -690,3 +690,184 @@ func TestRender_HarnessExtraRejectsEmptyPathSegments(t *testing.T) {
 		})
 	}
 }
+
+// TestRender_OpencodePersonaOverridesPrimaryStep covers a workflow step
+// (role: primary) that names a standing OpencodeAgent via Opencode.Agent:
+// opencode must render the referenced persona keyed by the PERSONA's own
+// name, using the persona's own prompt/permissions/description/model —
+// never the step's own copies of those fields — while default_agent
+// still resolves to the persona name so opencode's entry point actually
+// exists in the agent map.
+func TestRender_OpencodePersonaOverridesPrimaryStep(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{
+			"default": "claude-opus",
+			"smol":    "claude-haiku",
+			"big":     "claude-opus-big",
+		},
+		Bash: baseBashPolicy(),
+		Agents: []registry.Agent{
+			{
+				Name:        "orchestrate",
+				Description: "step description",
+				Role:        "primary",
+				Class:       "default",
+				Prompt:      registry.Prompt{Text: "step prompt, must not appear"},
+				Permissions: registry.Permissions{Edit: "allow", Write: "allow"},
+				Opencode:    &registry.StepOpencode{Agent: "lead"},
+			},
+		},
+		OpencodeAgents: []registry.OpencodeAgent{
+			{
+				Name:        "lead",
+				Description: "lead persona description",
+				Class:       "big",
+				Prompt:      registry.Prompt{Text: "lead persona prompt"},
+				Permissions: registry.Permissions{Edit: "deny", Write: "deny"},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	out := plan.Outputs[0].(render.MergeJSON)
+	agentObj := out.Object["agent"].(map[string]any)
+
+	if _, ok := agentObj["orchestrate"]; ok {
+		t.Errorf("agent map has key %q for the overriding step; want it absent", "orchestrate")
+	}
+	lead, ok := agentObj["lead"].(map[string]any)
+	if !ok {
+		t.Fatalf("agent map missing key %q, got %#v", "lead", agentObj)
+	}
+
+	if lead["prompt"] != "lead persona prompt" {
+		t.Errorf("got prompt %v, want the lead persona's own prompt", lead["prompt"])
+	}
+	if lead["description"] != "lead persona description" {
+		t.Errorf("got description %v, want the lead persona's own description", lead["description"])
+	}
+	if lead["model"] != "claude-opus-big" {
+		t.Errorf("got model %v, want claude-opus-big (lead persona's class)", lead["model"])
+	}
+	perm := lead["permission"].(map[string]any)
+	if perm["edit"] != "deny" || perm["write"] != "deny" {
+		t.Errorf("got permission %#v, want edit=deny write=deny (lead persona's own permissions)", perm)
+	}
+	if lead["mode"] != "primary" {
+		t.Errorf("got mode %v, want primary (from the step's own role)", lead["mode"])
+	}
+
+	if out.Object["default_agent"] != "lead" {
+		t.Errorf("got default_agent %v, want %q", out.Object["default_agent"], "lead")
+	}
+}
+
+// TestRender_OpencodePersonaSharedAcrossStepsRendersOnce covers two
+// workflow steps that both reference the same OpencodeAgent persona:
+// opencode must render it exactly once, and the rendered entry must
+// still carry the persona's own fields rather than either step's.
+func TestRender_OpencodePersonaSharedAcrossStepsRendersOnce(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{
+				Name:     "verify",
+				Role:     "delegate",
+				Class:    "default",
+				Prompt:   registry.Prompt{Text: "verify step prompt"},
+				Opencode: &registry.StepOpencode{Agent: "qa"},
+			},
+			{
+				Name:     "research",
+				Role:     "delegate",
+				Class:    "default",
+				Prompt:   registry.Prompt{Text: "research step prompt"},
+				Opencode: &registry.StepOpencode{Agent: "qa"},
+			},
+		},
+		OpencodeAgents: []registry.OpencodeAgent{
+			{
+				Name:        "qa",
+				Description: "qa persona",
+				Class:       "default",
+				Prompt:      registry.Prompt{Text: "qa persona prompt"},
+				Permissions: registry.Permissions{Task: "allow"},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	out := plan.Outputs[0].(render.MergeJSON)
+	agentObj := out.Object["agent"].(map[string]any)
+
+	if len(agentObj) != 1 {
+		t.Fatalf("got %d agent entries, want exactly 1 (deduped qa): %#v", len(agentObj), agentObj)
+	}
+	qa, ok := agentObj["qa"].(map[string]any)
+	if !ok {
+		t.Fatalf("agent map missing key %q, got %#v", "qa", agentObj)
+	}
+	if qa["prompt"] != "qa persona prompt" {
+		t.Errorf("got prompt %v, want the qa persona's own prompt", qa["prompt"])
+	}
+	perm := qa["permission"].(map[string]any)
+	if perm["task"] != "allow" {
+		t.Errorf("got permission %#v, want task=allow (qa persona's own permissions)", perm)
+	}
+}
+
+// TestRender_StepWithoutOpencodeOverrideUnchanged is a non-regression
+// check: a workflow step with Opencode left nil must render exactly as
+// it did before this override existed — from its own fields, keyed by
+// its own name.
+func TestRender_StepWithoutOpencodeOverrideUnchanged(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{
+				Name:        "build",
+				Description: "builds things",
+				Role:        "delegate",
+				Class:       "default",
+				Prompt:      registry.Prompt{Text: "You build."},
+				Permissions: registry.Permissions{Task: "allow"},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	out := plan.Outputs[0].(render.MergeJSON)
+	agentObj := out.Object["agent"].(map[string]any)
+
+	build, ok := agentObj["build"].(map[string]any)
+	if !ok {
+		t.Fatalf("agent map missing key %q, got %#v", "build", agentObj)
+	}
+	if build["prompt"] != "You build." {
+		t.Errorf("got prompt %v, want %q", build["prompt"], "You build.")
+	}
+	if build["description"] != "builds things" {
+		t.Errorf("got description %v, want %q", build["description"], "builds things")
+	}
+	if build["mode"] != "subagent" {
+		t.Errorf("got mode %v, want subagent", build["mode"])
+	}
+	perm := build["permission"].(map[string]any)
+	if perm["task"] != "allow" {
+		t.Errorf("got permission %#v, want task=allow", perm)
+	}
+}

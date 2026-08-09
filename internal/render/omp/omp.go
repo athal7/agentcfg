@@ -99,7 +99,13 @@ func (renderer) Capabilities() []render.Capability {
 // an MCP server config file, and a `omp config set` command per harness
 // setting the registry declares (tools.approval, derived from every
 // configured MCP server's Tools allowlist plus harnesses.omp.extra, and
-// any other harnesses.omp.extra entry verbatim).
+// any other harnesses.omp.extra entry verbatim). When the role: primary
+// step has Agent.Opencode set, its own prompt is opencode-only (see
+// renderAgentFiles/composedSections) and is never written to
+// APPEND_SYSTEM.md; that file is written only if something is left to
+// put in it (a non-overridden primary's own body, or a composed
+// role: advisory section) — an Opencode-overridden primary with no
+// advisory steps writes nothing at all.
 func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Plan, error) {
 	plan := &render.Plan{}
 	plan.Gaps = append(plan.Gaps, render.DetectGaps(reg, r.Capabilities())...)
@@ -120,19 +126,25 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 	})
 
 	if primary := render.PrimaryAgent(reg); primary != nil {
-		body, err := promptBody(*primary, readFile)
-		if err != nil {
-			return nil, fmt.Errorf("omp: primary agent %q: %w", primary.Name, err)
+		var body string
+		if primary.Opencode == nil {
+			var err error
+			body, err = promptBody(*primary, readFile)
+			if err != nil {
+				return nil, fmt.Errorf("omp: primary agent %q: %w", primary.Name, err)
+			}
 		}
 		composed, err := composedSections(reg, readFile)
 		if err != nil {
 			return nil, err
 		}
-		plan.Outputs = append(plan.Outputs, render.WriteFile{
-			Path:    appendSystemPath,
-			Mode:    0600,
-			Content: []byte(body + composed),
-		})
+		if body != "" || composed != "" {
+			plan.Outputs = append(plan.Outputs, render.WriteFile{
+				Path:    appendSystemPath,
+				Mode:    0600,
+				Content: []byte(body + composed),
+			})
+		}
 	}
 
 	bashCmd, err := renderBashPatternsCommand(reg)
@@ -221,7 +233,11 @@ func (r renderer) RenderProject(classes map[string]string, _ *registry.Registry,
 // instead (see composedSections) — but only when the registry actually
 // has a role: primary agent to compose into. An advisory agent in a
 // primary-less registry has nothing to splice into, so it falls back to
-// a normal standalone file here rather than being silently dropped.
+// a normal standalone file here rather than being silently dropped. A
+// step naming an Opencode persona (Agent.Opencode != nil) is
+// opencode-only by construction — omp has no standing named-agent-
+// definition concept to render it as, so it's skipped here regardless of
+// Targets/Role.
 // Paths are relative to agentsDir, per RebuildDir's documented
 // convention.
 func renderAgentFiles(reg *registry.Registry, readFile func(string) ([]byte, error)) ([]render.WriteFile, error) {
@@ -235,7 +251,7 @@ func renderAgentFiles(reg *registry.Registry, readFile func(string) ([]byte, err
 	}
 	var files []render.WriteFile
 	for _, a := range reg.Agents {
-		if !targets(a.Targets) {
+		if !targets(a.Targets) || a.Opencode != nil {
 			continue
 		}
 		if a.Role == "primary" || (a.Role == "advisory" && hasPrimary) {
@@ -258,10 +274,12 @@ func renderAgentFiles(reg *registry.Registry, readFile func(string) ([]byte, err
 // own prompt body in APPEND_SYSTEM.md: one "## <name>[: <description>]"
 // section per role: advisory, omp-targeting agent, in registry
 // declaration order. Returns "" (no-op) when no agent has role: advisory.
+// A step with Agent.Opencode set is opencode-only (see renderAgentFiles)
+// and is skipped here too, regardless of Role/Targets.
 func composedSections(reg *registry.Registry, readFile func(string) ([]byte, error)) (string, error) {
 	var b strings.Builder
 	for _, a := range reg.Agents {
-		if a.Role != "advisory" || !targets(a.Targets) {
+		if a.Role != "advisory" || !targets(a.Targets) || a.Opencode != nil {
 			continue
 		}
 		body, err := promptBody(a, readFile)

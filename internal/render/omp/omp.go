@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/athal7/agentcfg/internal/bashpolicy"
@@ -86,15 +87,20 @@ func (renderer) Capabilities() []render.Capability {
 		render.CapGlobalBashPolicy,
 		render.CapMCPLocalTransport,
 		render.CapMCPRemoteTransport,
+		render.CapMCPToolGlobs,
 		render.CapProjectModelPolicy,
 		render.CapCustomCommands,
 		render.CapStructuredWorkflowCommand,
+		render.CapHarnessPromptSuffix,
 	}
 }
 
 // Render produces a Plan that writes omp's native ~/.omp/agent config: per-agent
 // markdown files, a system prompt append, a global bash policy sync command,
-// and an MCP server config file.
+// an MCP server config file, and a `omp config set` command per harness
+// setting the registry declares (tools.approval, derived from every
+// configured MCP server's Tools allowlist plus harnesses.omp.extra, and
+// any other harnesses.omp.extra entry verbatim).
 func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Plan, error) {
 	plan := &render.Plan{}
 	plan.Gaps = append(plan.Gaps, render.DetectGaps(reg, r.Capabilities())...)
@@ -135,6 +141,22 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 		return nil, err
 	}
 	plan.Outputs = append(plan.Outputs, bashCmd)
+
+	approvalCmd, ok, err := renderToolsApprovalCommand(reg)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		plan.Outputs = append(plan.Outputs, approvalCmd)
+	}
+
+	extraCmds, err := renderExtraSettingsCommands(reg)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range extraCmds {
+		plan.Outputs = append(plan.Outputs, c)
+	}
 
 	mcpServers := map[string]any{}
 	for _, s := range reg.MCPServers {
@@ -205,6 +227,10 @@ func (r renderer) RenderProject(classes map[string]string, _ *registry.Registry,
 // convention.
 func renderAgentFiles(reg *registry.Registry, readFile func(string) ([]byte, error)) ([]render.WriteFile, error) {
 	hasPrimary := render.PrimaryAgent(reg) != nil
+	serversByName := make(map[string]registry.MCPServer, len(reg.MCPServers))
+	for _, s := range reg.MCPServers {
+		serversByName[s.Name] = s
+	}
 	var files []render.WriteFile
 	for _, a := range reg.Agents {
 		if !targets(a.Targets) {
@@ -220,7 +246,7 @@ func renderAgentFiles(reg *registry.Registry, readFile func(string) ([]byte, err
 		files = append(files, render.WriteFile{
 			Path:    a.Name + ".md",
 			Mode:    0600,
-			Content: []byte(renderAgentFile(a, body)),
+			Content: []byte(renderAgentFile(a, serversByName, body)),
 		})
 	}
 	return files, nil
@@ -254,14 +280,24 @@ func composedSections(reg *registry.Registry, readFile func(string) ([]byte, err
 
 // renderAgentFile builds one subagent markdown file: YAML frontmatter
 // (name, description, tools, optional spawns/model) followed by "---" and
-// the raw prompt body.
-func renderAgentFile(a registry.Agent, body string) string {
+// the raw prompt body. tools additionally grants every MCP tool id
+// serversByName resolves from the agent's mcp: entries (see
+// mcpServerToolIDs) — omp's frontmatter tools: list is a hard visibility
+// allowlist, not just an approval gate, so an agent granted an MCP server
+// without this can see the server's presence but not call any of its
+// tools.
+func renderAgentFile(a registry.Agent, serversByName map[string]registry.MCPServer, body string) string {
 	tools := append([]string{}, baseTools...)
 	if a.Permissions.Write == "allow" {
 		tools = append(tools, "write")
 	}
 	if a.Permissions.Edit == "allow" {
 		tools = append(tools, "edit", "ast_edit")
+	}
+	for _, m := range a.MCP {
+		if s, ok := serversByName[m.Server]; ok {
+			tools = append(tools, mcpServerToolIDs(s)...)
+		}
 	}
 
 	var b strings.Builder
@@ -282,17 +318,37 @@ func renderAgentFile(a registry.Agent, body string) string {
 	return b.String()
 }
 
-// promptBody reads a file-backed prompt's content, or returns an inline
-// prompt's text as-is.
+// promptBody resolves an agent's full prompt body: the shared Prompt,
+// followed by its harness_prompts["omp"] entry (if any), separated by a
+// blank line — see Agent.HarnessPrompts.
 func promptBody(a registry.Agent, readFile func(string) ([]byte, error)) (string, error) {
-	if a.ResolvedPromptFile != "" {
-		data, err := readFile(a.ResolvedPromptFile)
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+	base, err := promptText(a.ResolvedPromptFile, a.Prompt.Text, readFile)
+	if err != nil {
+		return "", err
 	}
-	return a.Prompt.Text, nil
+	extra, ok := a.HarnessPrompts[id]
+	if !ok {
+		return base, nil
+	}
+	extraText, err := promptText(extra.ResolvedPromptFile, extra.Prompt.Text, readFile)
+	if err != nil {
+		return "", err
+	}
+	return base + "\n\n" + extraText, nil
+}
+
+// promptText resolves a Prompt's literal text: file content when
+// resolvedFile is set, the inline text otherwise. Prompt validation
+// already guarantees exactly one of the two is non-empty.
+func promptText(resolvedFile, text string, readFile func(string) ([]byte, error)) (string, error) {
+	if resolvedFile == "" {
+		return text, nil
+	}
+	data, err := readFile(resolvedFile)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // targets reports whether an omitted/empty targets list (meaning "every
@@ -345,6 +401,84 @@ func translateDecision(d bashpolicy.Decision) string {
 		return "prompt"
 	}
 	return string(d)
+}
+
+// renderToolsApprovalCommand syncs omp's per-tool approval allow-list: one
+// "allow" entry per MCP tool id declared across every omp-targeting
+// server's Tools list (the same ids renderAgentFile grants a subagent —
+// every MCP tool a subagent can reach is already visibility-gated by its
+// frontmatter, so there's nothing to gain by leaving it unlisted here),
+// plus any static entries under harnesses.omp.extra["tools.approval"]
+// (e.g. omp's own built-in write/edit/task/bash tools, which the registry
+// declares rather than agentcfg opining on). Returns ok=false when
+// there's nothing to set, so Render can skip emitting a no-op command.
+func renderToolsApprovalCommand(reg *registry.Registry) (render.RunCommand, bool, error) {
+	approval := map[string]any{}
+	for _, s := range reg.MCPServers {
+		if !targets(s.Targets) {
+			continue
+		}
+		for _, toolID := range mcpServerToolIDs(s) {
+			approval[toolID] = "allow"
+		}
+	}
+
+	if raw, ok := reg.Harnesses[targetName].Extra["tools.approval"]; ok {
+		extraApproval, ok := raw.(map[string]any)
+		if !ok {
+			return render.RunCommand{}, false, fmt.Errorf(`omp: harnesses.omp.extra["tools.approval"] must be an object mapping tool id to decision`)
+		}
+		for k, v := range extraApproval {
+			approval[k] = v
+		}
+	}
+
+	if len(approval) == 0 {
+		return render.RunCommand{}, false, nil
+	}
+
+	approvalJSON, err := json.Marshal(approval)
+	if err != nil {
+		return render.RunCommand{}, false, fmt.Errorf("omp: marshaling tools.approval: %w", err)
+	}
+	return render.RunCommand{
+		Argv: []string{"omp", "config", "set", "tools.approval", string(approvalJSON)},
+		Why:  "sync mcp tool + built-in tool approval allow-list",
+	}, true, nil
+}
+
+// renderExtraSettingsCommands emits one `omp config set <key> <json>` per
+// harnesses.omp.extra entry, except "tools.approval" — that key is
+// already handled by renderToolsApprovalCommand, which merges it with the
+// registry-derived MCP tool grants rather than setting it verbatim.
+// Sorted by key for a deterministic, reproducible Plan.
+func renderExtraSettingsCommands(reg *registry.Registry) ([]render.RunCommand, error) {
+	extra := reg.Harnesses[targetName].Extra
+	if len(extra) == 0 {
+		return nil, nil
+	}
+
+	keys := make([]string, 0, len(extra))
+	for k := range extra {
+		if k == "tools.approval" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	cmds := make([]render.RunCommand, 0, len(keys))
+	for _, k := range keys {
+		valueJSON, err := json.Marshal(extra[k])
+		if err != nil {
+			return nil, fmt.Errorf("omp: marshaling harnesses.omp.extra[%q]: %w", k, err)
+		}
+		cmds = append(cmds, render.RunCommand{
+			Argv: []string{"omp", "config", "set", k, string(valueJSON)},
+			Why:  fmt.Sprintf("sync omp setting %q from harnesses.omp.extra", k),
+		})
+	}
+	return cmds, nil
 }
 
 // renderMCPServer resolves one mcp_servers entry into omp's native mcp.json

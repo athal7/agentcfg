@@ -553,3 +553,133 @@ func TestID(t *testing.T) {
 		t.Errorf("got ID %q, want opencode", got)
 	}
 }
+
+// TestRender_HarnessExtraMergesIntoOpencodeJSON covers harnesses.opencode.
+// extra fully owning opencode.json's static, non-registry-modeled keys
+// (server, plugin, provider, formatter, lsp) alongside the permission
+// leaves this renderer doesn't otherwise manage (grep/glob/lsp/websearch),
+// without disturbing the permission leaves it does (bash).
+func TestRender_HarnessExtraMergesIntoOpencodeJSON(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Harnesses: map[string]registry.HarnessConfig{
+			"opencode": {
+				Extra: map[string]any{
+					"server":                     map[string]any{"hostname": "127.0.0.1"},
+					"permission.grep":            "allow",
+					"permission.glob":            "allow",
+					"permission.lsp":             "allow",
+					"permission.webfetch_unused": "allow",
+				},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	if len(plan.Gaps) != 0 {
+		t.Fatalf("got %d gaps, want 0: %+v", len(plan.Gaps), plan.Gaps)
+	}
+
+	out := plan.Outputs[0].(render.MergeJSON)
+	server, ok := out.Object["server"].(map[string]any)
+	if !ok || server["hostname"] != "127.0.0.1" {
+		t.Errorf("got server %#v, want hostname 127.0.0.1", out.Object["server"])
+	}
+
+	perm := out.Object["permission"].(map[string]any)
+	if perm["grep"] != "allow" || perm["glob"] != "allow" || perm["lsp"] != "allow" {
+		t.Errorf("got permission %#v, want grep/glob/lsp allow from extra", perm)
+	}
+	if _, ok := perm["bash"]; !ok {
+		t.Errorf("got permission %#v, want Render's own bash leaf to survive alongside extra's leaves", perm)
+	}
+
+	for _, want := range []string{"server", "permission.grep", "permission.glob", "permission.lsp", "permission.webfetch_unused"} {
+		found := false
+		for _, m := range out.Managed {
+			if m == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Managed %v missing extra path %q", out.Managed, want)
+		}
+	}
+}
+
+// TestRender_HarnessExtraRejectsReservedTopLevelKey covers the collision
+// guard: an extra key naming a top-level key Render always manages itself
+// (e.g. "agent") must fail loudly rather than let the two writers race.
+func TestRender_HarnessExtraRejectsReservedTopLevelKey(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Harnesses: map[string]registry.HarnessConfig{
+			"opencode": {Extra: map[string]any{"agent": map[string]any{}}},
+		},
+	}
+
+	_, err := New().Render(reg, render.Options{})
+	if err == nil {
+		t.Fatal("expected an error for an extra key colliding with a Render-managed key, got nil")
+	}
+}
+
+// TestRender_HarnessExtraRejectsReservedPermissionLeaf covers the
+// finer-grained collision guard on "permission.<leaf>" paths: a leaf
+// Render already manages (e.g. "bash") must be rejected the same way a
+// top-level collision is.
+func TestRender_HarnessExtraRejectsReservedPermissionLeaf(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Harnesses: map[string]registry.HarnessConfig{
+			"opencode": {Extra: map[string]any{"permission.bash": map[string]any{}}},
+		},
+	}
+
+	_, err := New().Render(reg, render.Options{})
+	if err == nil {
+		t.Fatal("expected an error for extra permission.bash colliding with Render's own leaf, got nil")
+	}
+}
+
+// TestRender_HarnessPromptAppendsExtraContentForOpencode covers
+// Agent.HarnessPrompts["opencode"]: since opencode's prompt field can't
+// hold both a "{file:...}" reference and inline extra text, the renderer
+// must resolve and concatenate both into one literal string instead of
+// emitting the usual file reference.
+func TestRender_HarnessPromptAppendsExtraContentForOpencode(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{
+				Name:   "lead",
+				Role:   "primary",
+				Class:  "default",
+				Prompt: registry.Prompt{Text: "base prompt"},
+				HarnessPrompts: map[string]registry.HarnessPrompt{
+					"opencode": {Prompt: registry.Prompt{Text: "opencode extra"}},
+				},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	out := plan.Outputs[0].(render.MergeJSON)
+	prompt := out.Object["agent"].(map[string]any)["lead"].(map[string]any)["prompt"]
+	want := "base prompt\n\nopencode extra"
+	if prompt != want {
+		t.Errorf("got prompt %q, want %q", prompt, want)
+	}
+}

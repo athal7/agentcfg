@@ -106,6 +106,10 @@ func validateAgents(reg *Registry) []ValidationError {
 
 		errs = append(errs, validatePromptField(a.Prompt, fmt.Sprintf("agent %q", a.Name), reg.RootDir, rootReal)...)
 
+		for target, hp := range a.HarnessPrompts {
+			errs = append(errs, validatePromptField(hp.Prompt, fmt.Sprintf("agent %q harness_prompts[%q]", a.Name, target), reg.RootDir, rootReal)...)
+		}
+
 		if !a.Permissions.Bash.IsZero() {
 			if a.Permissions.Bash.Profile != "" {
 				if _, ok := reg.Bash.Profiles[a.Permissions.Bash.Profile]; !ok {

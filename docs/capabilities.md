@@ -20,11 +20,12 @@
 | external_directory_policy | ✓ | ✗ |
 | mcp_local_transport | ✓ | ✓ |
 | mcp_remote_transport | ✓ | ✓ |
-| mcp_tool_globs | ✓ | ✗ |
+| mcp_tool_globs | ✓ | ✓ |
 | mcp_per_tool_ask | ✓ | ✗ |
 | project_model_policy | ✓ | ✓ |
 | custom_commands | ✓ | ✓ |
 | structured_workflow_command | ✗ | ✓ |
+| harness_prompt_suffix | ✓ | ✓ |
 
 ≈ = same underlying feature, expressed via a different harness-native mechanism (not a gap):
 omp  primary_agent — via prompt_append

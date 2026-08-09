@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/athal7/agentcfg/internal/bashpolicy"
 	"github.com/athal7/agentcfg/internal/registry"
@@ -59,15 +61,35 @@ func (renderer) Capabilities() []render.Capability {
 		render.CapMCPPerToolAsk,
 		render.CapProjectModelPolicy,
 		render.CapCustomCommands,
+		render.CapHarnessPromptSuffix,
 	}
+}
+
+// reservedTopLevelKeys are the opencode.json top-level keys Render always
+// manages itself. harnesses.opencode.extra must not redeclare any of
+// them, or the two writers would silently fight over the same key on
+// every apply — the exact failure mode this renderer was built to avoid
+// (see the harness_prompts/extra design note in docs/schema.md).
+var reservedTopLevelKeys = map[string]bool{
+	"default_agent": true,
+	"agent":         true,
+	"tools":         true,
+	"mcp":           true,
+	"model":         true,
+	"small_model":   true,
 }
 
 // Render produces a Plan that merges the registry into opencode's native
 // opencode.json, covering model classes, agents, permissions, MCP tools,
-// and MCP server configuration.
+// MCP server configuration, and any harnesses.opencode.extra passthrough.
 func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Plan, error) {
 	plan := &render.Plan{}
 	plan.Gaps = append(plan.Gaps, render.DetectGaps(reg, r.Capabilities())...)
+
+	readFile := opt.ReadFile
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
 
 	globalBash, err := bashpolicy.Compile(reg.Bash, globalBashProfile)
 	if err != nil {
@@ -86,7 +108,7 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 
 	agentsObj := map[string]any{}
 	for _, a := range reg.Agents {
-		agentObj, err := renderAgent(reg, a)
+		agentObj, err := renderAgent(reg, a, readFile)
 		if err != nil {
 			return nil, err
 		}
@@ -115,6 +137,12 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 	managed := []string{"default_agent", "agent", "tools", "mcp", "model", "small_model"}
 	managed = append(managed, managedPermissionPaths()...)
 
+	extraManaged, err := applyExtra(obj, reg.Harnesses[id].Extra)
+	if err != nil {
+		return nil, err
+	}
+	managed = append(managed, extraManaged...)
+
 	plan.Outputs = append(plan.Outputs, render.MergeJSON{
 		Path:    configPath,
 		Mode:    0600,
@@ -122,10 +150,6 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 		Object:  obj,
 	})
 
-	readFile := opt.ReadFile
-	if readFile == nil {
-		readFile = os.ReadFile
-	}
 	commandsTree, err := render.RenderCommands(reg, readFile)
 	if err != nil {
 		return nil, fmt.Errorf("opencode: rendering commands: %w", err)
@@ -133,6 +157,65 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 	plan.Outputs = append(plan.Outputs, commandsTree)
 
 	return plan, nil
+}
+
+// applyExtra splices harnesses.opencode.extra into obj, returning the
+// dotted paths it added so the caller can mark them Managed. Each key is
+// a dotted JSON path (e.g. "server", "permission.grep"): a single-segment
+// key is a full top-level subtree replace; a dotted key descends into
+// (creating, if absent) intermediate objects and replaces only the final
+// leaf, so "permission.grep" merges alongside the permission leaves this
+// renderer already owns (managedPermissionPaths) rather than clobbering
+// them. Keys colliding with a reservedTopLevelKeys entry, or a
+// permission leaf Render already manages, are rejected — the registry
+// author must not declare the same key twice under two different
+// mechanisms.
+func applyExtra(obj map[string]any, extra map[string]any) ([]string, error) {
+	if len(extra) == 0 {
+		return nil, nil
+	}
+
+	reservedPermissionLeaves := map[string]bool{"bash": true}
+	for _, leaf := range permissionKey {
+		reservedPermissionLeaves[leaf] = true
+	}
+
+	managed := make([]string, 0, len(extra))
+	for key, value := range extra {
+		root, leaf, dotted := strings.Cut(key, ".")
+		if reservedTopLevelKeys[root] {
+			return nil, fmt.Errorf("opencode: harnesses.opencode.extra key %q collides with a key Render already manages", key)
+		}
+		if root == "permission" {
+			if !dotted || leaf == "" {
+				return nil, fmt.Errorf(`opencode: harnesses.opencode.extra key %q must be "permission.<leaf>" (Render already owns the bare "permission" object)`, key)
+			}
+			if reservedPermissionLeaves[leaf] {
+				return nil, fmt.Errorf("opencode: harnesses.opencode.extra key %q collides with a permission leaf Render already manages", key)
+			}
+		}
+		setDottedPath(obj, key, value)
+		managed = append(managed, key)
+	}
+	sort.Strings(managed)
+	return managed, nil
+}
+
+// setDottedPath sets value at a dotted path within obj, creating any
+// missing intermediate objects along the way. A key with no dot is a
+// direct top-level assignment.
+func setDottedPath(obj map[string]any, dotted string, value any) {
+	segments := strings.Split(dotted, ".")
+	cur := obj
+	for _, seg := range segments[:len(segments)-1] {
+		next, ok := cur[seg].(map[string]any)
+		if !ok {
+			next = map[string]any{}
+			cur[seg] = next
+		}
+		cur = next
+	}
+	cur[segments[len(segments)-1]] = value
 }
 
 // projectConfigPath is a literal, non-"~" path relative to the resolved
@@ -211,7 +294,7 @@ func agentBashMap(reg *registry.Registry, b registry.BashPermission) (map[string
 // renderAgent builds the opencode agent object for a single registry.Agent,
 // including its permission block (bash from agentBashMap, task/edit/write
 // from Permissions, external_directory, and MCP tool/ask settings).
-func renderAgent(reg *registry.Registry, a registry.Agent) (map[string]any, error) {
+func renderAgent(reg *registry.Registry, a registry.Agent, readFile func(string) ([]byte, error)) (map[string]any, error) {
 	bashMap, err := agentBashMap(reg, a.Permissions.Bash)
 	if err != nil {
 		return nil, fmt.Errorf("opencode: agent %q: %w", a.Name, err)
@@ -245,11 +328,15 @@ func renderAgent(reg *registry.Registry, a registry.Agent) (map[string]any, erro
 	if a.Role == "primary" {
 		opencodeMode = "primary"
 	}
+	prompt, err := renderPrompt(a, readFile)
+	if err != nil {
+		return nil, fmt.Errorf("opencode: agent %q: %w", a.Name, err)
+	}
 	agentObj := map[string]any{
 		"description": a.Description,
 		"mode":        opencodeMode,
 		"model":       reg.ModelClasses[a.Class],
-		"prompt":      renderPrompt(a),
+		"prompt":      prompt,
 		"permission":  perm,
 	}
 	if len(tools) > 0 {
@@ -262,12 +349,44 @@ func renderAgent(reg *registry.Registry, a registry.Agent) (map[string]any, erro
 }
 
 // renderPrompt returns opencode's "{file:...}" load-at-runtime reference
-// for a file-backed prompt, or the literal text for an inline prompt.
-func renderPrompt(a registry.Agent) string {
-	if a.ResolvedPromptFile != "" {
-		return fmt.Sprintf("{file:%s}", a.ResolvedPromptFile)
+// for a file-backed prompt, or the literal text for an inline prompt. When
+// the agent declares harness_prompts["opencode"], the extra content can't
+// be expressed as a second file reference in the same JSON string field,
+// so both parts are resolved to their literal text and concatenated
+// instead — the one case where this renderer reads a prompt file at
+// render time rather than deferring to opencode's own runtime load.
+func renderPrompt(a registry.Agent, readFile func(string) ([]byte, error)) (string, error) {
+	extra, ok := a.HarnessPrompts[id]
+	if !ok {
+		if a.ResolvedPromptFile != "" {
+			return fmt.Sprintf("{file:%s}", a.ResolvedPromptFile), nil
+		}
+		return a.Prompt.Text, nil
 	}
-	return a.Prompt.Text
+
+	base, err := promptText(a.ResolvedPromptFile, a.Prompt.Text, readFile)
+	if err != nil {
+		return "", fmt.Errorf("prompt: %w", err)
+	}
+	extraText, err := promptText(extra.ResolvedPromptFile, extra.Prompt.Text, readFile)
+	if err != nil {
+		return "", fmt.Errorf("harness_prompts[%q]: %w", id, err)
+	}
+	return base + "\n\n" + extraText, nil
+}
+
+// promptText resolves a Prompt's literal text: file content when
+// resolvedFile is set, the inline text otherwise. Prompt validation
+// already guarantees exactly one of the two is non-empty.
+func promptText(resolvedFile, text string, readFile func(string) ([]byte, error)) (string, error) {
+	if resolvedFile == "" {
+		return text, nil
+	}
+	data, err := readFile(resolvedFile)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // renderMCPServer resolves one mcp_servers entry into opencode's native mcp

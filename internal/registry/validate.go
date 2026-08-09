@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 // Validate checks a merged Registry for schema and consistency problems.
@@ -16,6 +17,7 @@ func Validate(reg *Registry) ([]ValidationError, []ValidationWarning) {
 	errs = append(errs, validateModelClasses(reg)...)
 	errs = append(errs, validateAgents(reg)...)
 	warns = append(warns, validateAgentWarnings(reg)...)
+	errs = append(errs, validateOpencodeAgents(reg)...)
 	errs = append(errs, validateBash(reg)...)
 	errs = append(errs, validateMCPServers(reg)...)
 	errs = append(errs, validateContexts(reg)...)
@@ -49,6 +51,25 @@ func isValidDecision(d Decision) bool {
 	return d == Allow || d == Deny || d == Ask
 }
 
+// targetsOmp reports whether an empty/omitted targets list ("every
+// harness") or an explicit list naming "omp" applies to omp's renderer.
+// Mirrors internal/render/omp's own unexported targets() helper — kept
+// duplicated rather than shared to avoid registry importing render.
+func targetsOmp(list []string) bool {
+	return len(list) == 0 || slices.Contains(list, "omp")
+}
+
+// stepsEqual reports whether two *int step-budget values are equal:
+// both nil, or both non-nil with the same dereferenced value. Used to
+// compare an Agent.Steps budget across multiple steps sharing one
+// opencode_agents persona.
+func stepsEqual(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
 // validateAgents reports errors in the registry's workflow steps.
 func validateAgents(reg *Registry) []ValidationError {
 	var errs []ValidationError
@@ -60,6 +81,35 @@ func validateAgents(reg *Registry) []ValidationError {
 	primaryCount := 0
 	var advisorySteps []string
 
+	opencodeAgentNames := map[string]bool{}
+	for _, oa := range reg.OpencodeAgents {
+		if oa.Name != "" {
+			opencodeAgentNames[oa.Name] = true
+		}
+	}
+
+	// referencedOpencodeAgents tracks which opencode_agents personas are
+	// actually pointed at by at least one step — needed below to reject
+	// a plain (non-overridden) step whose own Name would collide with a
+	// persona's rendered opencode.json agent.<name> key. An unreferenced
+	// persona sharing a name with a plain step is fine: it never
+	// renders, so there's no key for the plain step to collide with.
+	// firstOpencodeRef records the first (in Agents declaration order —
+	// the same order the opencode renderer resolves mode/steps from) step
+	// to reference each persona, so every later reference can be checked
+	// against it for the compatible-references check below.
+	referencedOpencodeAgents := map[string]bool{}
+	firstOpencodeRef := map[string]Agent{}
+	for _, a := range reg.Agents {
+		if a.Opencode == nil || a.Opencode.Agent == "" {
+			continue
+		}
+		referencedOpencodeAgents[a.Opencode.Agent] = true
+		if _, ok := firstOpencodeRef[a.Opencode.Agent]; !ok {
+			firstOpencodeRef[a.Opencode.Agent] = a
+		}
+	}
+
 	for _, a := range reg.Agents {
 		if a.Name == "" {
 			errs = append(errs, ValidationError{Message: "agent has no name"})
@@ -67,6 +117,12 @@ func validateAgents(reg *Registry) []ValidationError {
 			errs = append(errs, ValidationError{Message: fmt.Sprintf("duplicate agent name %q", a.Name)})
 		} else {
 			seenNames[a.Name] = true
+		}
+
+		if a.Opencode == nil && referencedOpencodeAgents[a.Name] {
+			errs = append(errs, ValidationError{
+				Message: fmt.Sprintf("agent %q renders as opencode agent key %q, which collides with a referenced opencode_agents persona of the same name — rename one of them", a.Name, a.Name),
+			})
 		}
 
 		switch a.Role {
@@ -84,8 +140,15 @@ func validateAgents(reg *Registry) []ValidationError {
 			// model-role name and interactive plan-mode toggle. Only a
 			// role: delegate step is ever dispatched by name as a
 			// standalone omp agent file — a primary or advisory step
-			// never reaches that dispatch path (see agentcfg#14).
-			if a.Name == "plan" {
+			// never reaches that dispatch path (see agentcfg#14). Scoped
+			// to steps that actually target omp (empty Targets means
+			// every harness) AND aren't opencode-agent-overridden: a
+			// step with targets: [opencode], or one naming an Opencode
+			// persona (which renders nothing for omp regardless of
+			// Targets/Role — see Agent.Opencode), never reaches omp's
+			// dispatch path either, so the name is safe there
+			// regardless of role.
+			if a.Name == "plan" && targetsOmp(a.Targets) && a.Opencode == nil {
 				errs = append(errs, ValidationError{
 					Message: `agent name "plan" collides with omp's native plan-mode machinery and will hang when dispatched — see agentcfg#14`,
 				})
@@ -127,6 +190,22 @@ func validateAgents(reg *Registry) []ValidationError {
 				})
 			}
 		}
+
+		if a.Opencode != nil {
+			if a.Opencode.Agent == "" {
+				errs = append(errs, ValidationError{
+					Message: fmt.Sprintf("agent %q sets opencode: but its agent field is empty", a.Name),
+				})
+			} else if !opencodeAgentNames[a.Opencode.Agent] {
+				errs = append(errs, ValidationError{
+					Message: fmt.Sprintf("agent %q references unknown opencode agent %q (not declared under opencode_agents)", a.Name, a.Opencode.Agent),
+				})
+			} else if first := firstOpencodeRef[a.Opencode.Agent]; (a.Role == "primary") != (first.Role == "primary") || !stepsEqual(a.Steps, first.Steps) {
+				errs = append(errs, ValidationError{
+					Message: fmt.Sprintf("agent %q references opencode agent %q with a different effective mode or steps budget than agent %q — every step sharing one opencode_agents persona must agree on role: primary vs. non-primary and on steps:", a.Name, a.Opencode.Agent, first.Name),
+				})
+			}
+		}
 	}
 
 	if primaryCount > 1 {
@@ -161,6 +240,64 @@ func validateAgentWarnings(reg *Registry) []ValidationWarning {
 		})
 	}
 	return warns
+}
+
+// validateOpencodeAgents reports errors in the registry's opencode_agents
+// section — standing opencode personas referenced by name from workflow
+// steps via Agent.Opencode (see that field's doc comment). Validated the
+// same way as a workflow step's own name/class/prompt/bash/
+// external_directory fields, minus Role (opencode_agents has no role —
+// it's not a workflow step, just a rendering target one or more steps
+// point at).
+func validateOpencodeAgents(reg *Registry) []ValidationError {
+	var errs []ValidationError
+
+	rootReal, _ := filepath.EvalSymlinks(reg.RootDir)
+	seenNames := map[string]bool{}
+
+	for _, oa := range reg.OpencodeAgents {
+		if oa.Name == "" {
+			errs = append(errs, ValidationError{Message: "opencode agent has no name"})
+		} else if seenNames[oa.Name] {
+			errs = append(errs, ValidationError{Message: fmt.Sprintf("duplicate opencode agent name %q", oa.Name)})
+		} else {
+			seenNames[oa.Name] = true
+		}
+
+		if oa.Class == "" {
+			errs = append(errs, ValidationError{Message: fmt.Sprintf("opencode agent %q has no class", oa.Name)})
+		} else if _, ok := reg.ModelClasses[oa.Class]; !ok {
+			errs = append(errs, ValidationError{
+				Message: fmt.Sprintf("opencode agent %q references unknown model class %q", oa.Name, oa.Class),
+			})
+		}
+
+		errs = append(errs, validatePromptField(oa.Prompt, fmt.Sprintf("opencode agent %q", oa.Name), reg.RootDir, rootReal)...)
+
+		if !oa.Permissions.Bash.IsZero() {
+			if oa.Permissions.Bash.Profile != "" {
+				if _, ok := reg.Bash.Profiles[oa.Permissions.Bash.Profile]; !ok {
+					errs = append(errs, ValidationError{
+						Message: fmt.Sprintf("opencode agent %q references unknown bash profile %q", oa.Name, oa.Permissions.Bash.Profile),
+					})
+				}
+			} else if oa.Permissions.Bash.Decision != string(Allow) && oa.Permissions.Bash.Decision != string(Deny) {
+				errs = append(errs, ValidationError{
+					Message: fmt.Sprintf("opencode agent %q has invalid permissions.bash %q (must be allow or deny)", oa.Name, oa.Permissions.Bash.Decision),
+				})
+			}
+		}
+
+		for pattern, decision := range oa.Permissions.ExternalDirectory {
+			if !isValidDecision(decision) {
+				errs = append(errs, ValidationError{
+					Message: fmt.Sprintf("opencode agent %q permissions.external_directory pattern %q has invalid decision %q (must be allow, deny, or ask)", oa.Name, pattern, decision),
+				})
+			}
+		}
+	}
+
+	return errs
 }
 
 // validateBash reports errors in the registry's bash policy lists and profiles.

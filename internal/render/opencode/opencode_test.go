@@ -669,3 +669,24 @@ func TestRender_HarnessExtraRejectsNestedPermissionPath(t *testing.T) {
 		t.Fatal("expected an error for a nested permission.read.foo extra key, got nil")
 	}
 }
+
+// TestRender_HarnessExtraRejectsEmptyPathSegments covers malformed dotted
+// keys ("", ".tools", "tools.", "tools..foo") that would otherwise let
+// setDottedPath write empty-string object keys into opencode.json instead
+// of failing loudly on invalid harness configuration.
+func TestRender_HarnessExtraRejectsEmptyPathSegments(t *testing.T) {
+	for _, key := range []string{"", ".tools", "tools.", "tools..foo"} {
+		t.Run(key, func(t *testing.T) {
+			reg := &registry.Registry{
+				ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+				Bash:         baseBashPolicy(),
+				Harnesses: map[string]registry.HarnessConfig{
+					"opencode": {Extra: map[string]any{key: "x"}},
+				},
+			}
+			if _, err := New().Render(reg, render.Options{}); err == nil {
+				t.Fatalf("expected an error for extra key %q, got nil", key)
+			}
+		})
+	}
+}

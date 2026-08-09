@@ -181,6 +181,9 @@ func applyExtra(obj map[string]any, extra map[string]any) ([]string, error) {
 
 	managed := make([]string, 0, len(extra))
 	for key, value := range extra {
+		if key == "" || strings.HasPrefix(key, ".") || strings.HasSuffix(key, ".") || strings.Contains(key, "..") {
+			return nil, fmt.Errorf("opencode: harnesses.opencode.extra key %q must contain non-empty JSON path segments", key)
+		}
 		root, suffix, dotted := strings.Cut(key, ".")
 		if reservedTopLevelKeys[root] {
 			return nil, fmt.Errorf("opencode: harnesses.opencode.extra key %q collides with a key Render already manages", key)

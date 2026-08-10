@@ -95,7 +95,7 @@ harnesses:
     bash_profile: lead
 ```
 
-A map from harness/renderer ID (`opencode`, `omp`) to a `HarnessConfig`:
+A map from harness/renderer ID (`opencode`, `omp`, `codex`) to a `HarnessConfig`:
 
 | field | yaml tag | type | meaning |
 |---|---|---|---|
@@ -104,7 +104,7 @@ A map from harness/renderer ID (`opencode`, `omp`) to a `HarnessConfig`:
 | `BashProfile` | `bash_profile` | string | which bash profile `agentcfg explain bash` treats as this harness's relevant profile (defaults to `"global"` if unset) |
 | `Extra` | `extra` | `map[string]any` | harness-native configuration the registry model has no dedicated field for — see [`extra:`](#extra) below |
 
-**Known asymmetry, documented rather than hidden:** both renderers
+**Known asymmetry, documented rather than hidden:** opencode and omp
 currently compile the hardcoded profile named `"global"` when actually
 rendering (`bashpolicy.Compile(reg.Bash, "global")` in both
 `internal/render/opencode` and `internal/render/omp`) — `bash_profile`

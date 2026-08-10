@@ -1,6 +1,8 @@
 package opencode
 
 import (
+	"bytes"
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -8,6 +10,7 @@ import (
 
 	"github.com/athal7/agentcfg/internal/registry"
 	"github.com/athal7/agentcfg/internal/render"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 func intPtr(n int) *int { return &n }
@@ -20,12 +23,13 @@ func baseBashPolicy() registry.BashPolicy {
 	}
 }
 
-// TestRender_LeadAndBuildWithOneMCPServer covers the happy path: a primary
-// + subagent pair, one remote mcp server the subagent references with an
-// ask pattern, and a bare default bash policy. Fixture (a) from the phase 2
-// task spec.
-func TestRender_LeadAndBuildWithOneMCPServer(t *testing.T) {
-	reg := &registry.Registry{
+// leadAndBuildFixture returns a primary + subagent pair, one remote mcp
+// server the subagent references with an ask pattern, and a bare default
+// bash policy. Shared by TestRender_LeadAndBuildWithOneMCPServer (fixture
+// (a) from the phase 2 task spec) and TestRender_MatchesOpencodeConfigSchema,
+// which validates the same rendered output against opencode's real schema.
+func leadAndBuildFixture() *registry.Registry {
+	return &registry.Registry{
 		ModelClasses: map[string]string{
 			"default": "claude-opus",
 			"smol":    "claude-haiku",
@@ -60,6 +64,10 @@ func TestRender_LeadAndBuildWithOneMCPServer(t *testing.T) {
 			},
 		},
 	}
+}
+
+func TestRender_LeadAndBuildWithOneMCPServer(t *testing.T) {
+	reg := leadAndBuildFixture()
 
 	plan, err := New().Render(reg, render.Options{})
 	if err != nil {
@@ -161,6 +169,51 @@ func TestRender_LeadAndBuildWithOneMCPServer(t *testing.T) {
 
 	if !reflect.DeepEqual(out.Object, want) {
 		t.Errorf("Object mismatch.\ngot:  %#v\nwant: %#v", out.Object, want)
+	}
+}
+
+// TestRender_MatchesOpencodeConfigSchema validates rendered opencode.json
+// output against opencode's own published, additionalProperties:false
+// config schema (vendored at testdata/opencode-config.schema.json — see
+// testdata/README.md) instead of a second copy of agentcfg's own
+// assumptions. TestRender_LeadAndBuildWithOneMCPServer's reflect.DeepEqual
+// against a hand-built `want` map answers "did Render choose the values
+// agentcfg intends" (business logic); this test answers the different
+// question a golden map can't: "would opencode actually accept this
+// document" (wire-shape acceptability) — the same distinction ADR-0003
+// draws for omp's bash.patterns contract test. additionalProperties:false
+// at nearly every level means a renamed/misspelled key (the exact bug
+// class ADR-0003 documents on the omp side) fails this test even when a
+// hand-typed golden map would happily agree with itself.
+func TestRender_MatchesOpencodeConfigSchema(t *testing.T) {
+	reg := leadAndBuildFixture()
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	out, ok := plan.Outputs[0].(render.MergeJSON)
+	if !ok {
+		t.Fatalf("output is %T, want render.MergeJSON", plan.Outputs[0])
+	}
+
+	compiler := jsonschema.NewCompiler()
+	schema, err := compiler.Compile("testdata/opencode-config.schema.json")
+	if err != nil {
+		t.Fatalf("compiling vendored opencode config schema: %v", err)
+	}
+
+	raw, err := json.Marshal(out.Object)
+	if err != nil {
+		t.Fatalf("marshaling rendered Object: %v", err)
+	}
+	instance, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("decoding rendered Object as a schema instance: %v", err)
+	}
+
+	if err := schema.Validate(instance); err != nil {
+		t.Errorf("rendered opencode.json fails opencode's own config schema:\n%v\n\nrendered:\n%s", err, raw)
 	}
 }
 

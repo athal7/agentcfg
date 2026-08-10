@@ -366,8 +366,20 @@ func targets(list []string) bool {
 }
 
 // renderBashPatternsCommand syncs the compiled global bash policy, ordered
-// most-specific-first, via omp's CLI. Each rule becomes a {pattern,
-// decision} object; "ask" translates to omp's "prompt" decision name.
+// most-specific-first, via omp's CLI. Each rule becomes a {match, approval}
+// object — the exact field names omp's BashTool.approval() reads via
+// getBashApprovalPatternRules() (packages/coding-agent/src/tools/bash.ts;
+// also documented in omp's own tools/bash.md, "Each rule has a `match` glob
+// and an `approval` value of `allow`, `prompt`, or `deny`"). This renderer
+// previously emitted {pattern, decision} — a plausible-looking but wrong
+// pair of names that decoded to zero rules on the omp side (every item
+// failed the `typeof record.match === "string"` guard and was silently
+// dropped), so global bash policy was a complete no-op there: every
+// command fell through to bare tier "exec" with no explicit policy, which
+// let harnesses.omp.extra's tools.approval.bash: allow win by default —
+// masked because that allow-list exists specifically to cover the *tool*
+// grant, on the assumption bash.patterns independently gated dangerous
+// commands beneath it. "ask" translates to omp's "prompt" decision name.
 func renderBashPatternsCommand(reg *registry.Registry) (render.RunCommand, error) {
 	compiled, err := bashpolicy.Compile(reg.Bash, globalBashProfile)
 	if err != nil {
@@ -378,8 +390,8 @@ func renderBashPatternsCommand(reg *registry.Registry) (render.RunCommand, error
 	patterns := make([]map[string]string, len(rules))
 	for i, rule := range rules {
 		patterns[i] = map[string]string{
-			"pattern":  rule.Pattern,
-			"decision": translateDecision(rule.Decision),
+			"match":    rule.Pattern,
+			"approval": translateDecision(rule.Decision),
 		}
 	}
 

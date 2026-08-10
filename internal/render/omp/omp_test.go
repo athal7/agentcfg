@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/athal7/agentcfg/internal/bashpolicy"
 	"github.com/athal7/agentcfg/internal/registry"
 	"github.com/athal7/agentcfg/internal/render"
 )
@@ -130,13 +131,21 @@ func TestRender_LeadAndBuildProducesFourOutputs(t *testing.T) {
 		t.Errorf("got content %q, want %q", appendFile.Content, "You are the lead.")
 	}
 
+	// Structural check only (argv shape, element count) — this test's job
+	// is confirming Render() produces one RunCommand of the right kind
+	// among its five outputs, not re-verifying the payload's wire
+	// semantics. A byte-exact JSON string here used to be this repo's
+	// only check on that payload and passed for the entire lifetime of a
+	// real {pattern,decision}-vs-{match,approval} field-name bug (see
+	// ADR-0003): a hand-typed golden string can drift in lockstep with a
+	// renderer bug written by the same author in the same sitting.
+	// TestRender_BashPatternsCommand_MatchesOmpApprovalContract owns the
+	// "does this payload mean the right thing to a real omp" question via
+	// a decode-and-resolve check against the documented wire contract.
 	cmd := outputByType[render.RunCommand](t, plan.Outputs)
-	wantArgv := []string{
-		"omp", "config", "set", "bash.patterns",
-		`[{"decision":"allow","pattern":"ls*"},{"decision":"prompt","pattern":"*"}]`,
-	}
-	if !reflect.DeepEqual(cmd.Argv, wantArgv) {
-		t.Errorf("got argv %v, want %v", cmd.Argv, wantArgv)
+	wantArgvPrefix := []string{"omp", "config", "set", "bash.patterns"}
+	if len(cmd.Argv) != 5 || !reflect.DeepEqual(cmd.Argv[:4], wantArgvPrefix) {
+		t.Errorf("got argv %v, want prefix %v plus one JSON payload element", cmd.Argv, wantArgvPrefix)
 	}
 
 	mcp := outputByType[render.MergeJSON](t, plan.Outputs)
@@ -153,6 +162,71 @@ func TestRender_LeadAndBuildProducesFourOutputs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(mcp.Object, wantMCP) {
 		t.Errorf("got mcp object %#v, want %#v", mcp.Object, wantMCP)
+	}
+}
+
+// TestRender_BashPatternsCommand_MatchesOmpApprovalContract decodes the
+// rendered bash.patterns payload using the exact wire shape omp's own
+// BashTool.approval() consumes (packages/coding-agent/src/tools/bash.ts's
+// getBashApprovalPatternRules(): {match, approval} objects — also
+// documented in omp's own tools/bash.md) and resolves representative
+// commands against it. A golden-string assertion on the renderer's Argv
+// output (as TestRender_LeadAndBuildProducesFourOutputs's wantArgv does)
+// passes even if the field names silently drift from what the real
+// consumer expects, since it only checks the renderer agrees with itself.
+// This test instead exercises the actual downstream behavior the renderer
+// exists to produce: given this rendered config, does a guardrail-listed
+// command actually resolve to "prompt", and does an unmatched command fall
+// through to the profile's base decision? The {pattern, decision} bug this
+// test guards against decoded every rule's Match/Approval to "", so no
+// rule (and not even the intended catch-all) would ever fire, silently
+// turning every configured guardrail into a no-op — both assertions below
+// would fail under that regression.
+func TestRender_BashPatternsCommand_MatchesOmpApprovalContract(t *testing.T) {
+	reg := &registry.Registry{
+		Bash: registry.BashPolicy{
+			Lists: map[string]map[string]registry.Decision{
+				"guardrails": {"git push*": registry.Ask, "sudo *": registry.Ask},
+			},
+			DefaultLists: sp([]string{"guardrails"}),
+			Profiles: map[string]registry.BashProfile{
+				"global": {Base: registry.Allow, Lists: []string{"guardrails"}},
+			},
+		},
+	}
+
+	cmd, err := renderBashPatternsCommand(reg)
+	if err != nil {
+		t.Fatalf("renderBashPatternsCommand returned error: %v", err)
+	}
+	if len(cmd.Argv) != 5 {
+		t.Fatalf("got argv %v, want 5 elements", cmd.Argv)
+	}
+
+	var wire []struct {
+		Match    string `json:"match"`
+		Approval string `json:"approval"`
+	}
+	if err := json.Unmarshal([]byte(cmd.Argv[4]), &wire); err != nil {
+		t.Fatalf("decoding rendered bash.patterns as omp's {match,approval} wire shape: %v", err)
+	}
+
+	resolve := func(command string) string {
+		for _, rule := range wire {
+			if bashpolicy.MatchGlob(rule.Match, command) {
+				return rule.Approval
+			}
+		}
+		return "" // no rule matched at all — omp falls through to bare tier "exec"
+	}
+
+	if got := resolve("git push origin main"); got != "prompt" {
+		t.Errorf("resolve(%q) = %q, want %q (guardrail must still gate a destructive command)",
+			"git push origin main", got, "prompt")
+	}
+	if got := resolve("git status"); got != "allow" {
+		t.Errorf("resolve(%q) = %q, want %q (unmatched command falls through to the profile's base decision)",
+			"git status", got, "allow")
 	}
 }
 
@@ -966,6 +1040,67 @@ func TestRender_ToolsApprovalCommandDerivedFromMCPServersAndExtra(t *testing.T) 
 		t.Fatalf("unmarshaling tools.approval JSON: %v", err)
 	}
 	want := map[string]string{"mcp__github_search_code": "allow", "write": "allow", "task": "allow"}
+	if !reflect.DeepEqual(approval, want) {
+		t.Errorf("got tools.approval %#v, want %#v", approval, want)
+	}
+}
+
+// TestRender_ToolsApprovalCommandExpandsAskPatterns covers the fix
+// documented in renderToolsApprovalCommand's doc comment and
+// docs/decisions/0003: an agent's mcp: ask glob must expand into literal
+// "prompt" tools.approval entries, because omp's real approval resolver
+// (packages/coding-agent/src/tools/approval.ts's resolveApproval) does an
+// exact map lookup with no glob support — unlike opencode, which can
+// write the glob straight into a per-agent permission block. Two agents:
+// one omp-targeting (github, ordinary case) and one opencode-only
+// (slack, targets: [opencode]) — the opencode-only agent's ask pattern
+// must still expand, because omp has no per-role tools.approval scoping
+// to withhold it from and the pattern describes a real property of the
+// tool, not of the step that happened to declare it.
+func TestRender_ToolsApprovalCommandExpandsAskPatterns(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		MCPServers: []registry.MCPServer{
+			{
+				Name: "github", Transport: "remote", URL: registry.Value{Literal: "https://example.invalid"},
+				Tools: []string{"search_code", "create_issue", "merge_pull_request"},
+			},
+			{
+				Name: "runlayer-slack", Transport: "remote", URL: registry.Value{Literal: "https://example.invalid"},
+				Tools: []string{"slack_read_channel", "slack_send_message", "slack_schedule_message"},
+			},
+		},
+		Agents: []registry.Agent{
+			{
+				Name: "github", Targets: []string{"opencode", "omp"},
+				MCP: []registry.AgentMCP{{Server: "github", Ask: []string{"create_*", "merge_*"}}},
+			},
+			{
+				Name: "slack", Targets: []string{"opencode"},
+				MCP: []registry.AgentMCP{{Server: "runlayer-slack", Ask: []string{"slack_send_*", "slack_schedule_*"}}},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	cmd := findRunCommand(t, plan.Outputs, "tools.approval")
+	var approval map[string]string
+	if err := json.Unmarshal([]byte(cmd.Argv[4]), &approval); err != nil {
+		t.Fatalf("unmarshaling tools.approval JSON: %v", err)
+	}
+	want := map[string]string{
+		"mcp__github_search_code":                    "allow",
+		"mcp__github_create_issue":                   "prompt",
+		"mcp__github_merge_pull_request":             "prompt",
+		"mcp__runlayer_slack_slack_read_channel":     "allow",
+		"mcp__runlayer_slack_slack_send_message":     "prompt",
+		"mcp__runlayer_slack_slack_schedule_message": "prompt",
+	}
 	if !reflect.DeepEqual(approval, want) {
 		t.Errorf("got tools.approval %#v, want %#v", approval, want)
 	}

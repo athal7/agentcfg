@@ -420,18 +420,71 @@ func translateDecision(d bashpolicy.Decision) string {
 // server's Tools list (the same ids renderAgentFile grants a subagent —
 // every MCP tool a subagent can reach is already visibility-gated by its
 // frontmatter, so there's nothing to gain by leaving it unlisted here),
-// plus any static entries under harnesses.omp.extra["tools.approval"]
-// (e.g. omp's own built-in write/edit/task/bash tools, which the registry
-// declares rather than agentcfg opining on). Returns ok=false when
-// there's nothing to set, so Render can skip emitting a no-op command.
+// then one "prompt" entry per tool id matched by any agent's mcp: ask
+// glob against that same server's Tools list — overriding the blanket
+// allow for exactly those tool ids — plus any static entries under
+// harnesses.omp.extra["tools.approval"] (e.g. omp's own built-in
+// write/edit/task/bash tools, which the registry declares rather than
+// agentcfg opining on).
+//
+// The ask-expansion step exists because omp's tools.approval resolution
+// (packages/coding-agent/src/tools/approval.ts's resolveApproval,
+// confirmed against omp v17.2.11) does an *exact* map lookup
+// (Object.hasOwn(userConfig, tool.name)) — no glob support — unlike
+// opencode, whose renderAgent (opencode.go) can write a literal
+// "<server>_<pattern>" glob key straight into an agent's own permission
+// block because opencode's permission resolver matches glob keys at
+// runtime. omp has neither that per-agent permission surface nor
+// runtime glob matching, so agentcfg must pre-expand each ask pattern
+// into the literal tool ids it matches, at render time, using the same
+// glob semantics bashpolicy already implements. Applied globally (every
+// caller, not just the agent that declared the ask pattern) because omp
+// has no per-role tools.approval scoping to target it more narrowly —
+// see docs/decisions/0003 and upstream oh-my-pi#3091 (subagents are
+// hard-forced to tools.approvalMode: yolo, confirmed still open/
+// unimplemented) for why this is the only lever available: an *exact*
+// tools.approval entry is the one thing verified (oh-my-pi#3091's
+// discussion, comment by @roboomp) to still reject inside a headless
+// subagent — as a tool-call error the model sees, not a real interactive
+// prompt, but categorically different from yolo's silent auto-allow.
+// This closes real exposure only for tool ids agentcfg actually knows
+// about (present in some server's Tools: list); a tool absent from every
+// server's Tools: list is invisible to this renderer and stays
+// ungated for any caller without a restricted subagent frontmatter —
+// today that's every omp caller, since zero subagent files render (see
+// renderAgentFiles's doc comment). Returns ok=false when there's nothing
+// to set, so Render can skip emitting a no-op command.
 func renderToolsApprovalCommand(reg *registry.Registry) (render.RunCommand, bool, error) {
 	approval := map[string]any{}
+	omptargetingServers := map[string]registry.MCPServer{}
 	for _, s := range reg.MCPServers {
 		if !targets(s.Targets) {
 			continue
 		}
+		omptargetingServers[s.Name] = s
 		for _, toolID := range mcpServerToolIDs(s) {
 			approval[toolID] = "allow"
+		}
+	}
+
+	// Ask-pattern expansion: independent of whether the declaring agent
+	// itself targets omp (an opencode-only step's ask list still
+	// describes a real property of the tool, not of that step), but
+	// scoped to servers that do target omp — a pattern naming a
+	// non-omp-targeting server has nothing to expand against here.
+	for _, a := range reg.Agents {
+		for _, m := range a.MCP {
+			server, ok := omptargetingServers[m.Server]
+			if !ok {
+				continue
+			}
+			for _, pattern := range m.Ask {
+				for _, tool := range server.Tools {
+					if bashpolicy.MatchGlob(pattern, tool) {
+						approval[createMCPToolName(server.Name, tool)] = "prompt"
+					}
+				}
+			}
 		}
 	}
 

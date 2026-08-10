@@ -1045,6 +1045,67 @@ func TestRender_ToolsApprovalCommandDerivedFromMCPServersAndExtra(t *testing.T) 
 	}
 }
 
+// TestRender_ToolsApprovalCommandExpandsAskPatterns covers the fix
+// documented in renderToolsApprovalCommand's doc comment and
+// docs/decisions/0003: an agent's mcp: ask glob must expand into literal
+// "prompt" tools.approval entries, because omp's real approval resolver
+// (packages/coding-agent/src/tools/approval.ts's resolveApproval) does an
+// exact map lookup with no glob support — unlike opencode, which can
+// write the glob straight into a per-agent permission block. Two agents:
+// one omp-targeting (github, ordinary case) and one opencode-only
+// (slack, targets: [opencode]) — the opencode-only agent's ask pattern
+// must still expand, because omp has no per-role tools.approval scoping
+// to withhold it from and the pattern describes a real property of the
+// tool, not of the step that happened to declare it.
+func TestRender_ToolsApprovalCommandExpandsAskPatterns(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		MCPServers: []registry.MCPServer{
+			{
+				Name: "github", Transport: "remote", URL: registry.Value{Literal: "https://example.invalid"},
+				Tools: []string{"search_code", "create_issue", "merge_pull_request"},
+			},
+			{
+				Name: "runlayer-slack", Transport: "remote", URL: registry.Value{Literal: "https://example.invalid"},
+				Tools: []string{"slack_read_channel", "slack_send_message", "slack_schedule_message"},
+			},
+		},
+		Agents: []registry.Agent{
+			{
+				Name: "github", Targets: []string{"opencode", "omp"},
+				MCP: []registry.AgentMCP{{Server: "github", Ask: []string{"create_*", "merge_*"}}},
+			},
+			{
+				Name: "slack", Targets: []string{"opencode"},
+				MCP: []registry.AgentMCP{{Server: "runlayer-slack", Ask: []string{"slack_send_*", "slack_schedule_*"}}},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	cmd := findRunCommand(t, plan.Outputs, "tools.approval")
+	var approval map[string]string
+	if err := json.Unmarshal([]byte(cmd.Argv[4]), &approval); err != nil {
+		t.Fatalf("unmarshaling tools.approval JSON: %v", err)
+	}
+	want := map[string]string{
+		"mcp__github_search_code":                    "allow",
+		"mcp__github_create_issue":                   "prompt",
+		"mcp__github_merge_pull_request":             "prompt",
+		"mcp__runlayer_slack_slack_read_channel":     "allow",
+		"mcp__runlayer_slack_slack_send_message":     "prompt",
+		"mcp__runlayer_slack_slack_schedule_message": "prompt",
+	}
+	if !reflect.DeepEqual(approval, want) {
+		t.Errorf("got tools.approval %#v, want %#v", approval, want)
+	}
+}
+
 // TestRender_ToolsApprovalCommandAbsentWhenNothingToSet covers the no-op
 // case: no MCP servers and no harnesses.omp.extra["tools.approval"] means
 // Render must not emit an empty `omp config set tools.approval '{}'` call.

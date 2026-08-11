@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -540,6 +541,9 @@ func renderMCPServer(s registry.MCPServer) (map[string]any, bool, *render.Gap) {
 		}
 		// omp's mcp-schema.json types "command" as a bare executable
 		// string with a separate "args" array, not a single argv array.
+		if resolved[0] == "" {
+			return nil, false, resolveFailureGap(s, "command", fmt.Errorf("command executable is empty"))
+		}
 		entry["command"] = resolved[0]
 		if len(resolved) > 1 {
 			entry["args"] = resolved[1:]
@@ -571,7 +575,11 @@ func renderHeaderValue(v registry.Value) (string, error) {
 		}
 		return lazyFormat(v.Format, "", `"$`+v.Name+`"`), nil
 	case "file":
-		cmd := "cat -- " + shellQuote(v.Path)
+		path, err := expandHome(v.Path)
+		if err != nil {
+			return "", err
+		}
+		cmd := "cat -- " + shellQuote(path)
 		return lazyFormat(v.Format, cmd, `"$(`+cmd+`)"`), nil
 	case "command":
 		if len(v.Run) == 0 {
@@ -635,6 +643,25 @@ func shellQuoteArgv(argv []string) string {
 		quoted[i] = shellWord(a)
 	}
 	return strings.Join(quoted, " ")
+}
+
+// expandHome expands a leading ~ or ~/ to the current user's home
+// directory, mirroring registry.Value.Resolve()'s own (unexported)
+// expansion for `from: file` — needed here since a header's `!cat`
+// directive quotes the path, which would otherwise disable the shell's
+// own tilde expansion at omp's connect time.
+func expandHome(path string) (string, error) {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path, nil
+	}
+	u, err := user.Current()
+	if err != nil {
+		return "", fmt.Errorf("expanding %s: %w", path, err)
+	}
+	if path == "~" {
+		return u.HomeDir, nil
+	}
+	return filepath.Join(u.HomeDir, path[2:]), nil
 }
 
 // resolveFailureGap builds a GapSkip for an MCP server whose URL, command,

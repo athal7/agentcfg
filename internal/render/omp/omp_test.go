@@ -2,6 +2,8 @@ package omp
 
 import (
 	"encoding/json"
+	"os/user"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -21,6 +23,19 @@ func baseBashPolicy() registry.BashPolicy {
 			"global": {Base: registry.Ask},
 		},
 	}
+}
+
+// homeSecretTokenPath returns the expanded absolute path for
+// "~/secret-token", mirroring renderHeaderValue's own expandHome so the
+// header lazy-resolution test can assert home-relative expansion without
+// hardcoding the test machine's home directory.
+func homeSecretTokenPath(t *testing.T) string {
+	t.Helper()
+	u, err := user.Current()
+	if err != nil {
+		t.Fatalf("user.Current: %v", err)
+	}
+	return filepath.Join(u.HomeDir, "secret-token")
 }
 
 func sp(s []string) *[]string { return &s }
@@ -469,6 +484,7 @@ func TestRender_MCPRemoteTransportRendersHeadersLazily(t *testing.T) {
 					"X-Env-Fmt":     {From: "env", Name: "GITHUB_TOKEN", Format: "Bearer {}"},
 					"X-File-Bare":   {From: "file", Path: "/etc/secret"},
 					"X-File-Fmt":    {From: "file", Path: "/etc/secret", Format: "Bearer {}"},
+					"X-File-Home":   {From: "file", Path: "~/secret-token"},
 				},
 			},
 		},
@@ -504,6 +520,7 @@ func TestRender_MCPRemoteTransportRendersHeadersLazily(t *testing.T) {
 		"X-Env-Fmt":     `!printf 'Bearer %s' "$GITHUB_TOKEN"`,
 		"X-File-Bare":   "!cat -- '/etc/secret'",
 		"X-File-Fmt":    `!printf 'Bearer %s' "$(cat -- '/etc/secret')"`,
+		"X-File-Home":   "!cat -- " + shellQuote(homeSecretTokenPath(t)),
 	}
 	if !reflect.DeepEqual(headers, want) {
 		t.Errorf("got headers %#v, want %#v", headers, want)
@@ -567,6 +584,46 @@ func TestRender_MCPLocalTransportSplitsCommandAndArgs(t *testing.T) {
 	}
 	if _, hasArgs := noArgs["args"]; hasArgs {
 		t.Errorf("got no-args %#v, want no args key (single-element command)", noArgs)
+	}
+}
+
+// TestRender_MCPLocalTransportEmptyExecutableGapsServer covers a
+// nonempty command list that resolves its first element to an empty
+// string (e.g. an unset env var or a blank literal) — omp's schema
+// requires a nonempty "command", so the server must be skipped with a
+// gap instead of rendering "command": "".
+func TestRender_MCPLocalTransportEmptyExecutableGapsServer(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		MCPServers: []registry.MCPServer{
+			{
+				Name:      "blank-executable",
+				Transport: "local",
+				Command:   []registry.Value{{Literal: ""}, {Literal: "--root"}, {Literal: "/tmp"}},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	var haveGap bool
+	for _, g := range plan.Gaps {
+		if g.Subject == "mcp:blank-executable" && g.Capability == render.CapMCPLocalTransport {
+			haveGap = true
+		}
+	}
+	if !haveGap {
+		t.Errorf("expected a mcp_local_transport gap for mcp:blank-executable, got %+v", plan.Gaps)
+	}
+
+	mcp := outputByType[render.MergeJSON](t, plan.Outputs)
+	servers := mcp.Object["mcpServers"].(map[string]any)
+	if len(servers) != 0 {
+		t.Errorf("got mcpServers %#v, want empty (blank-executable server should be skipped)", servers)
 	}
 }
 

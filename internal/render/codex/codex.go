@@ -141,22 +141,24 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 	})
 
 	primary := render.PrimaryAgent(reg)
-	if primary != nil && !targets(primary.Targets) {
-		// A role: primary agent that opts out of codex via targets: has
-		// no codex-visible primary at all — treat it exactly like a
-		// primary-less registry, not "primary agent, but ignore its own
-		// opt-out", which would otherwise still bind its model/
-		// sandbox_mode and prompt into AGENTS.md regardless.
+	if primary != nil && (!targets(primary.Targets) || primary.Opencode != nil) {
+		// A role: primary agent that opts out of codex via targets:, or
+		// that names a standing Opencode persona (Agent.Opencode != nil),
+		// is invisible to codex entirely: no model/sandbox_mode binding,
+		// no AGENTS.md content. The Opencode-persona case mirrors
+		// schema.go's Agent.Opencode contract verbatim — "every renderer
+		// other than opencode... renders nothing for [it] at all...
+		// regardless of Targets/Role" — not just its prompt body; the
+		// step's own Class/Permissions are opencode-persona-adjacent
+		// metadata here too, not independent workflow-level truth to
+		// bind elsewhere.
 		primary = nil
 	}
 
 	if primary != nil {
-		var body string
-		if primary.Opencode == nil {
-			body, err = promptBody(*primary, readFile)
-			if err != nil {
-				return nil, fmt.Errorf("codex: primary agent %q: %w", primary.Name, err)
-			}
+		body, err := promptBody(*primary, readFile)
+		if err != nil {
+			return nil, fmt.Errorf("codex: primary agent %q: %w", primary.Name, err)
 		}
 		composed, err := composedSections(reg, readFile)
 		if err != nil {

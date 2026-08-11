@@ -661,3 +661,46 @@ func TestRender_OpencodeOverrideStepRendersNothingForCodex(t *testing.T) {
 		t.Errorf("got AGENTS.md content %q, want %q (opencode-override step must not appear)", agentsMd.Content, want)
 	}
 }
+
+// TestRender_OpencodeOverridePrimaryOmitsModelAndAgentsMd covers the
+// case TestRender_OpencodeOverrideStepRendersNothingForCodex doesn't
+// reach: the PRIMARY step itself names an Opencode persona. Per
+// Agent.Opencode's contract ("every renderer other than opencode...
+// renders nothing for it at all... regardless of Targets/Role"), codex
+// must not bind model/sandbox_mode from this step's own Class/
+// Permissions either — those are opencode-persona-adjacent metadata
+// here, not independent workflow-level truth — nor append anything to
+// AGENTS.md, exactly as if there were no primary agent at all.
+func TestRender_OpencodeOverridePrimaryOmitsModelAndAgentsMd(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"big": "gpt-5.6"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{
+				Name:        "lead",
+				Role:        "primary",
+				Class:       "big",
+				Prompt:      registry.Prompt{Text: "You are the lead."},
+				Permissions: registry.Permissions{Edit: "allow", Write: "allow"},
+				Opencode:    &registry.StepOpencode{Agent: "lead-persona"},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	if len(plan.Outputs) != 2 {
+		t.Fatalf("got %d outputs, want 2 (agents RebuildDir + commands RebuildTree): %+v", len(plan.Outputs), plan.Outputs)
+	}
+	for _, o := range plan.Outputs {
+		switch o.(type) {
+		case render.WriteFile:
+			t.Errorf("no WriteFile (AGENTS.md) expected: the only primary agent names an Opencode persona, got %+v", o)
+		case render.MergeTOML:
+			t.Errorf("no MergeTOML (config.toml) expected: the only primary agent names an Opencode persona, got %+v", o)
+		}
+	}
+}

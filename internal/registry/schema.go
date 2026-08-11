@@ -352,6 +352,22 @@ type MCPServer struct {
 	// glob-based namespace (e.g. tools: [slack_search, slack_send_message]).
 	// Empty means no such allowlist was declared.
 	Tools []string `yaml:"tools,omitempty"`
+
+	// ExcludeForModels is a list of model identifiers. When a project's
+	// resolved model classes (the map passed to RenderProject) contain any
+	// value matching one of these identifiers, the server is dropped for
+	// that project. This lets a project whose classes route to a
+	// small-context local model avoid paying the system-prompt/tool-schema
+	// cost of a server it can't afford — on omp that cost is unavoidable
+	// per-turn overhead, because omp mounts every targeted server into the
+	// primary session with no per-role visibility layer (ADR-0002).
+	//
+	// Only the omp renderer consumes this today: it emits the matching
+	// servers as omp "mcp:<name>" ids under the project config's
+	// disabledExtensions. opencode needs no equivalent — its per-role
+	// tools/permission layer already scopes each server's visibility, so a
+	// role that never lists a server pays no schema cost for it.
+	ExcludeForModels []string `yaml:"exclude_for_models,omitempty"`
 }
 
 // ContextMatch is the match: block of a contexts.yaml entry.

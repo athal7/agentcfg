@@ -2,7 +2,7 @@
 
 `agentcfg` compiles one YAML registry — your agents, model classes, bash
 policy, and MCP servers — into native configuration for multiple
-coding-agent CLI harnesses (`opencode` and `omp` in v1). It's
+coding-agent CLI harnesses (`opencode`, `omp`, and `codex` in v1). It's
 harness-agnostic by design: nothing in the registry format is specific to
 any one tool, and where a harness genuinely can't express something the
 registry describes, `agentcfg` documents that fidelity gap explicitly
@@ -39,7 +39,7 @@ succeeded — a renderer that also runs that harness's own CLI as part of
 applying (e.g. `omp` syncing its bash policy via `omp config set ...`)
 needs that CLI actually installed; `apply` still writes everything else it
 can and reports each target's outcome, but returns non-zero if any step
-failed. Use `--target opencode` (or `--target omp`) to scope a run to just
+failed. Use `--target opencode` (or `--target omp`, `--target codex`) to scope a run to just
 one harness. See `agentcfg apply --help` and `docs/wiring.md` for the full
 flag set (`--scope`, `--context`, `--strict`, ...).
 

@@ -70,6 +70,22 @@ func stepsEqual(a, b *int) bool {
 	return *a == *b
 }
 
+// isValidAgentName reports whether name is safe to render as a single
+// path segment: omp and codex each write one file per agent named
+// after it (<name>.md, <name>.toml) — a name containing a path
+// separator could escape the intended directory (e.g. "../outside"),
+// and one containing "/" would create a nested file that the
+// non-recursive glob these renderers use to prune stale files never
+// discovers. Unlike isValidCommandName, agent names aren't restricted
+// to a specific character set — no external spec constrains them —
+// this only guards path-segment safety.
+func isValidAgentName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	return filepath.Base(name) == name
+}
+
 // validateAgents reports errors in the registry's workflow steps.
 func validateAgents(reg *Registry) []ValidationError {
 	var errs []ValidationError
@@ -115,6 +131,11 @@ func validateAgents(reg *Registry) []ValidationError {
 			errs = append(errs, ValidationError{Message: "agent has no name"})
 		} else if seenNames[a.Name] {
 			errs = append(errs, ValidationError{Message: fmt.Sprintf("duplicate agent name %q", a.Name)})
+		} else if !isValidAgentName(a.Name) {
+			seenNames[a.Name] = true
+			errs = append(errs, ValidationError{
+				Message: fmt.Sprintf("agent name %q is not a safe path segment (must not contain a path separator and must not be \".\" or \"..\")", a.Name),
+			})
 		} else {
 			seenNames[a.Name] = true
 		}

@@ -5,8 +5,8 @@ import "testing"
 func TestAll_RegistersEveryBuiltinRenderer(t *testing.T) {
 	all := All()
 
-	if len(all) != 2 {
-		t.Fatalf("got %d renderers, want 2: %v", len(all), all)
+	if len(all) != 3 {
+		t.Fatalf("got %d renderers, want 3: %v", len(all), all)
 	}
 
 	seen := map[string]bool{}
@@ -17,7 +17,7 @@ func TestAll_RegistersEveryBuiltinRenderer(t *testing.T) {
 		}
 		seen[id] = true
 	}
-	for _, want := range []string{"opencode", "omp"} {
+	for _, want := range []string{"opencode", "omp", "codex"} {
 		if !seen[want] {
 			t.Errorf("expected renderer id %q to be registered", want)
 		}

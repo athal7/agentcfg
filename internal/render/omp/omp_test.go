@@ -147,7 +147,8 @@ func TestRender_LeadAndBuildProducesFourOutputs(t *testing.T) {
 		"mcpServers": map[string]any{
 			"fs": map[string]any{
 				"lifecycle": "lazy",
-				"command":   []any{"mcp-fs", "--root", "/tmp"},
+				"command":   "mcp-fs",
+				"args":      []string{"--root", "/tmp"},
 			},
 		},
 	}
@@ -439,6 +440,178 @@ func TestRender_MixedLocalAndRemoteMCPServers(t *testing.T) {
 	}
 	if _, hasCommand := remote["command"]; hasCommand {
 		t.Errorf("got remote-one %#v, want no command key", remote)
+	}
+}
+
+// TestRender_MCPRemoteTransportRendersHeadersLazily covers the remote
+// transport bug: headers must render using omp's own `!<command>`
+// pre-connect resolution (docs/mcp-config.md "Pre-connect env/header
+// resolution") for any source that can go stale between reconnects,
+// instead of being silently dropped or baked in as a stale snapshot.
+// Also covers the "type": "http" field a remote entry needs — omp
+// defaults an untyped entry to stdio, which then fails validation for
+// lacking "command".
+func TestRender_MCPRemoteTransportRendersHeadersLazily(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		MCPServers: []registry.MCPServer{
+			{
+				Name:      "gh",
+				Transport: "remote",
+				URL:       registry.Value{Literal: "https://api.githubcopilot.com/mcp/"},
+				Headers: map[string]registry.Value{
+					"X-Literal":     {Literal: "static-value"},
+					"X-Env-Bare":    {From: "env", Name: "MY_TOKEN"},
+					"Authorization": {From: "command", Run: []string{"gh", "auth", "token"}, Format: "Bearer {}"},
+					"X-Cmd-Bare":    {From: "command", Run: []string{"gh", "auth", "token"}},
+					"X-Cmd-Quoted":  {From: "command", Run: []string{"op", "read", "op://vault/github token"}},
+					"X-Env-Fmt":     {From: "env", Name: "GITHUB_TOKEN", Format: "Bearer {}"},
+					"X-File-Bare":   {From: "file", Path: "/etc/secret"},
+					"X-File-Fmt":    {From: "file", Path: "/etc/secret", Format: "Bearer {}"},
+				},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	if len(plan.Gaps) != 0 {
+		t.Fatalf("got %d gaps, want 0: %+v", len(plan.Gaps), plan.Gaps)
+	}
+
+	mcp := outputByType[render.MergeJSON](t, plan.Outputs)
+	servers := mcp.Object["mcpServers"].(map[string]any)
+	gh := servers["gh"].(map[string]any)
+	if gh["type"] != "http" {
+		t.Errorf(`got type %#v, want "http"`, gh["type"])
+	}
+	if gh["url"] != "https://api.githubcopilot.com/mcp/" {
+		t.Errorf("got url %#v, want https://api.githubcopilot.com/mcp/", gh["url"])
+	}
+	headers, ok := gh["headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("got headers %#v, want a map", gh["headers"])
+	}
+	want := map[string]any{
+		"X-Literal":     "static-value",
+		"X-Env-Bare":    "MY_TOKEN",
+		"Authorization": `!printf 'Bearer %s' "$(gh auth token)"`,
+		"X-Cmd-Bare":    "!gh auth token",
+		"X-Cmd-Quoted":  `!op read 'op://vault/github token'`,
+		"X-Env-Fmt":     `!printf 'Bearer %s' "$GITHUB_TOKEN"`,
+		"X-File-Bare":   "!cat -- '/etc/secret'",
+		"X-File-Fmt":    `!printf 'Bearer %s' "$(cat -- '/etc/secret')"`,
+	}
+	if !reflect.DeepEqual(headers, want) {
+		t.Errorf("got headers %#v, want %#v", headers, want)
+	}
+}
+
+// TestRender_MCPLocalTransportSplitsCommandAndArgs covers the local
+// transport bug: omp's mcp-schema.json types "command" as a bare
+// executable string with a separate "args" array, not a single argv
+// array — bundling the whole resolved command into "command" produces
+// an entry omp cannot launch.
+func TestRender_MCPLocalTransportSplitsCommandAndArgs(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		MCPServers: []registry.MCPServer{
+			{
+				Name:      "filesystem",
+				Transport: "local",
+				Command: []registry.Value{
+					{Literal: "npx"},
+					{Literal: "-y"},
+					{Literal: "@modelcontextprotocol/server-filesystem"},
+					{Literal: "/tmp"},
+				},
+			},
+			{
+				Name:      "no-args",
+				Transport: "local",
+				Command:   []registry.Value{{Literal: "mcp-server-solo"}},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	if len(plan.Gaps) != 0 {
+		t.Fatalf("got %d gaps, want 0: %+v", len(plan.Gaps), plan.Gaps)
+	}
+
+	mcp := outputByType[render.MergeJSON](t, plan.Outputs)
+	servers := mcp.Object["mcpServers"].(map[string]any)
+
+	fs := servers["filesystem"].(map[string]any)
+	if fs["command"] != "npx" {
+		t.Errorf("got command %#v, want %q", fs["command"], "npx")
+	}
+	wantArgs := []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp"}
+	if !reflect.DeepEqual(fs["args"], wantArgs) {
+		t.Errorf("got args %#v, want %#v", fs["args"], wantArgs)
+	}
+	if _, hasURL := fs["url"]; hasURL {
+		t.Errorf("got filesystem %#v, want no url key", fs)
+	}
+
+	noArgs := servers["no-args"].(map[string]any)
+	if noArgs["command"] != "mcp-server-solo" {
+		t.Errorf("got command %#v, want %q", noArgs["command"], "mcp-server-solo")
+	}
+	if _, hasArgs := noArgs["args"]; hasArgs {
+		t.Errorf("got no-args %#v, want no args key (single-element command)", noArgs)
+	}
+}
+
+// TestRender_MCPHeaderResolveFailureGapsServer covers a header whose
+// source fails to render: env/file/command headers are now rendered
+// lazily (as an omp `!<command>` directive, never read/run at agentcfg
+// render time), so the only render-time failure left is a malformed
+// declaration such as an empty command argv — the server must still be
+// skipped with a gap, like an unresolvable url, rather than rendering
+// with a missing or partially-resolved headers map.
+func TestRender_MCPHeaderResolveFailureGapsServer(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		MCPServers: []registry.MCPServer{
+			{
+				Name:      "broken-headers",
+				Transport: "remote",
+				URL:       registry.Value{Literal: "https://api.example.com/mcp"},
+				Headers: map[string]registry.Value{
+					"Authorization": {From: "command", Run: []string{}},
+				},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	var haveGap bool
+	for _, g := range plan.Gaps {
+		if g.Subject == "mcp:broken-headers" && g.Capability == render.CapMCPRemoteTransport {
+			haveGap = true
+		}
+	}
+	if !haveGap {
+		t.Errorf("expected a mcp_remote_transport gap for mcp:broken-headers, got %+v", plan.Gaps)
+	}
+
+	mcp := outputByType[render.MergeJSON](t, plan.Outputs)
+	servers := mcp.Object["mcpServers"].(map[string]any)
+	if len(servers) != 0 {
+		t.Errorf("got mcpServers %#v, want empty (broken server should be skipped)", servers)
 	}
 }
 

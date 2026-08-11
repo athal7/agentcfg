@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -570,25 +571,162 @@ func renderMCPServer(s registry.MCPServer) (map[string]any, bool, *render.Gap) {
 	entry := map[string]any{"lifecycle": "lazy"}
 	switch s.Transport {
 	case "remote":
+		// omp's mcp-schema.json requires an explicit "type" for any
+		// non-stdio transport; omitting it defaults to stdio, which then
+		// fails validation for lacking "command" (docs/mcp-config.md
+		// "Practical implications").
+		entry["type"] = "http"
 		url, err := s.URL.Resolve()
 		if err != nil {
 			return nil, false, resolveFailureGap(s, "url", err)
 		}
 		entry["url"] = url
+		if len(s.Headers) > 0 {
+			headers := make(map[string]any, len(s.Headers))
+			for name, v := range s.Headers {
+				rendered, err := renderHeaderValue(v)
+				if err != nil {
+					return nil, false, resolveFailureGap(s, "headers."+name, err)
+				}
+				headers[name] = rendered
+			}
+			entry["headers"] = headers
+		}
 	case "local":
-		cmd := make([]any, 0, len(s.Command))
-		for _, part := range s.Command {
-			resolved, err := part.Resolve()
+		if len(s.Command) == 0 {
+			return nil, false, resolveFailureGap(s, "command", fmt.Errorf("command list is empty"))
+		}
+		resolved := make([]string, len(s.Command))
+		for i, part := range s.Command {
+			r, err := part.Resolve()
 			if err != nil {
 				return nil, false, resolveFailureGap(s, "command", err)
 			}
-			cmd = append(cmd, resolved)
+			resolved[i] = r
 		}
-		entry["command"] = cmd
+		// omp's mcp-schema.json types "command" as a bare executable
+		// string with a separate "args" array, not a single argv array.
+		if resolved[0] == "" {
+			return nil, false, resolveFailureGap(s, "command", fmt.Errorf("command executable is empty"))
+		}
+		entry["command"] = resolved[0]
+		if len(resolved) > 1 {
+			entry["args"] = resolved[1:]
+		}
 	default:
 		return nil, false, resolveFailureGap(s, "transport", fmt.Errorf("unknown transport %q", s.Transport))
 	}
 	return entry, true, nil
+}
+
+// renderHeaderValue converts one mcp_servers[].headers[*] Value into the
+// string omp's mcp.json headers map expects. A literal has no external
+// state to go stale, so it's resolved once, eagerly, exactly like
+// Value.Resolve(). Every other source (env, file, command) is instead
+// rendered using omp's own `!<command>` pre-connect header resolution
+// (docs/mcp-config.md "Pre-connect env/header resolution") so omp re-runs
+// the lookup on every reconnect — essential for a rotating credential
+// such as `gh auth token` — instead of baking a resolved snapshot into
+// the rendered config at agentcfg render time.
+func renderHeaderValue(v registry.Value) (string, error) {
+	switch v.From {
+	case "":
+		return v.Resolve()
+	case "env":
+		if v.Format == "" {
+			// omp's own bare-name idiom: copies straight from the
+			// process environment at connect time, no subshell needed.
+			return v.Name, nil
+		}
+		return lazyFormat(v.Format, "", `"$`+v.Name+`"`), nil
+	case "file":
+		path, err := expandHome(v.Path)
+		if err != nil {
+			return "", err
+		}
+		cmd := "cat -- " + shellQuote(path)
+		return lazyFormat(v.Format, cmd, `"$(`+cmd+`)"`), nil
+	case "command":
+		if len(v.Run) == 0 {
+			return "", fmt.Errorf("resolving value from command: run list is empty")
+		}
+		cmd := shellQuoteArgv(v.Run)
+		return lazyFormat(v.Format, cmd, `"$(`+cmd+`)"`), nil
+	default:
+		return "", fmt.Errorf("unknown value source %q", v.From)
+	}
+}
+
+// lazyFormat builds omp's `!`-prefixed pre-connect resolution string for
+// a source whose raw value can only be known at connect time. rawCmd is
+// the shell command line whose trimmed stdout is the raw value, used
+// directly (no format) when format is empty; subExpr is that same value
+// pre-wrapped for embedding as a printf argument (`"$(cmd)"` or
+// `"$NAME"`), used to reproduce Value.Resolve()'s own
+// strings.ReplaceAll(format, "{}", resolved) via `printf` at connect
+// time instead of at render time.
+func lazyFormat(format, rawCmd, subExpr string) string {
+	if format == "" {
+		return "!" + rawCmd
+	}
+	n := strings.Count(format, "{}")
+	if n == 0 {
+		// Matches ReplaceAll's no-op when "{}" is absent: the raw value
+		// is never substituted in, so it needn't be evaluated at all.
+		return format
+	}
+	printfFmt := strings.ReplaceAll(strings.ReplaceAll(format, "%", "%%"), "{}", "%s")
+	return "!printf " + shellQuote(printfFmt) + strings.Repeat(" "+subExpr, n)
+}
+
+// shellQuote quotes s as a single POSIX shell word using forced single
+// quotes, for values (a printf format string, a file path) that
+// typically contain spaces or other characters a shell would otherwise
+// split or expand.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// shellWord quotes s only when it contains shell metacharacters, leaving
+// a plain word (an executable name or CLI argument like "auth" or
+// "token") unquoted so the rendered `!<command>` directive reads the way
+// a user would type it by hand.
+func shellWord(s string) string {
+	if s != "" && !strings.ContainsAny(s, " \t\n'\"\\$`!*?[]{}()<>|&;~#") {
+		return s
+	}
+	return shellQuote(s)
+}
+
+// shellQuoteArgv renders an argv slice (Value.Run, executed directly via
+// exec.Command with no shell) as one shell command line, so omp's own
+// `!<command>` shell evaluation reproduces exactly the same argv
+// agentcfg itself would run.
+func shellQuoteArgv(argv []string) string {
+	quoted := make([]string, len(argv))
+	for i, a := range argv {
+		quoted[i] = shellWord(a)
+	}
+	return strings.Join(quoted, " ")
+}
+
+// expandHome expands a leading ~ or ~/ to the current user's home
+// directory, mirroring registry.Value.Resolve()'s own (unexported)
+// expansion for `from: file` — needed here since a header's `!cat`
+// directive quotes the path, which would otherwise disable the shell's
+// own tilde expansion at omp's connect time.
+func expandHome(path string) (string, error) {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path, nil
+	}
+	u, err := user.Current()
+	if err != nil {
+		return "", fmt.Errorf("expanding %s: %w", path, err)
+	}
+	if path == "~" {
+		return u.HomeDir, nil
+	}
+	return filepath.Join(u.HomeDir, path[2:]), nil
 }
 
 // resolveFailureGap builds a GapSkip for an MCP server whose URL, command,

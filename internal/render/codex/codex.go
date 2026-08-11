@@ -81,6 +81,11 @@ func (renderer) ID() string { return id }
 // (name/description/model/sandbox_mode/developer_instructions) rather
 // than inventing behavior around an unconfirmed field.
 //
+// CapMCPPerToolAsk IS declared, despite mcp_servers.<server> being one
+// global table in config.toml, not a per-agent one: see
+// applyMCPPerToolAsk's doc for the resulting one-directional (adds
+// prompts, never removes one) fidelity note.
+//
 // Declined entirely, becoming Gaps via DetectGaps:
 //   - CapBash* / CapPerAgentBashPolicy / CapGlobalBashPolicy: Codex's
 //     bash control surface is sandbox_mode/approval_policy, a coarse
@@ -135,7 +140,17 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 		Files: agentFiles,
 	})
 
-	if primary := render.PrimaryAgent(reg); primary != nil {
+	primary := render.PrimaryAgent(reg)
+	if primary != nil && !targets(primary.Targets) {
+		// A role: primary agent that opts out of codex via targets: has
+		// no codex-visible primary at all — treat it exactly like a
+		// primary-less registry, not "primary agent, but ignore its own
+		// opt-out", which would otherwise still bind its model/
+		// sandbox_mode and prompt into AGENTS.md regardless.
+		primary = nil
+	}
+
+	if primary != nil {
 		var body string
 		if primary.Opencode == nil {
 			body, err = promptBody(*primary, readFile)
@@ -159,7 +174,7 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 	configObj := map[string]any{}
 	var managed []string
 
-	if primary := render.PrimaryAgent(reg); primary != nil {
+	if primary != nil {
 		if model := reg.ModelClasses[primary.Class]; model != "" {
 			configObj["model"] = model
 			managed = append(managed, "model")
@@ -516,6 +531,15 @@ func resolveFailureGap(s registry.MCPServer, field string, err error) *render.Ga
 // opencode's glob-capable permission key — so a pattern containing a
 // glob character is dropped with a GapReduction instead of silently
 // producing a TOML key that will never match a real tool call.
+//
+// mcp_servers.<server> is one global table, not a per-agent one — so
+// this deliberately widens each ask pattern to every agent sharing
+// that server, including one that granted the same tool without an
+// ask. This is a one-directional (adds prompts, never removes one)
+// fidelity reduction inherent to Codex's config surface (see
+// Capabilities()'s CapMCPPerToolAsk note), not a per-registry
+// condition DetectGaps can point at, so it's recorded here rather than
+// as a Gap.
 func applyMCPPerToolAsk(reg *registry.Registry, mcpServers map[string]any) []render.Gap {
 	var gaps []render.Gap
 	for _, a := range reg.Agents {

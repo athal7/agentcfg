@@ -583,6 +583,37 @@ workflow:
 	}
 }
 
+func TestValidate_AgentNameUnsafePathSegment(t *testing.T) {
+	tests := []struct {
+		name  string
+		agent string
+	}{
+		{"parent_traversal", `"../outside"`},
+		{"nested_path", `"nested/name"`},
+		{"dot", `"."`},
+		{"dotdot", `".."`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files := minimalFixtureFiles()
+			files["agents.yaml"] = `
+workflow:
+  steps:
+    - name: ` + tt.agent + `
+      class: default
+      prompt: { text: "a" }
+`
+			_, errs, _, err := loadFixture(t, files)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if !anyErrorContains(errs, "is not a safe path segment") {
+				t.Errorf("errs = %v, want unsafe-path-segment error for %s", errs, tt.agent)
+			}
+		})
+	}
+}
+
 func TestValidate_MoreThanOnePrimaryAgent(t *testing.T) {
 	files := minimalFixtureFiles()
 	files["agents.yaml"] = `

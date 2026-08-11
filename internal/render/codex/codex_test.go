@@ -585,6 +585,47 @@ func TestRender_TargetsRestrictsOutput(t *testing.T) {
 	}
 }
 
+// TestRender_PrimaryAgentTargetsExclusionOmitsModelAndAgentsMd covers
+// the path TestRender_TargetsRestrictsOutput doesn't reach: a role:
+// primary agent whose own targets: excludes codex. render.PrimaryAgent
+// finds it regardless (it isn't targets-aware), so Render must apply
+// its own targets() guard before binding model/sandbox_mode or
+// appending AGENTS.md — otherwise a primary agent that opted out of
+// codex would still leak into codex's config.
+func TestRender_PrimaryAgentTargetsExclusionOmitsModelAndAgentsMd(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"big": "gpt-5.6"},
+		Bash:         baseBashPolicy(),
+		Agents: []registry.Agent{
+			{
+				Name:        "lead",
+				Role:        "primary",
+				Class:       "big",
+				Prompt:      registry.Prompt{Text: "You are the lead."},
+				Permissions: registry.Permissions{Edit: "deny", Write: "deny"},
+				Targets:     []string{"vscode"},
+			},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	if len(plan.Outputs) != 2 {
+		t.Fatalf("got %d outputs, want 2 (agents RebuildDir + commands RebuildTree): %+v", len(plan.Outputs), plan.Outputs)
+	}
+	for _, o := range plan.Outputs {
+		switch o.(type) {
+		case render.WriteFile:
+			t.Errorf("no WriteFile (AGENTS.md) expected: the only primary agent's targets excludes codex, got %+v", o)
+		case render.MergeTOML:
+			t.Errorf("no MergeTOML (config.toml) expected: the only primary agent's targets excludes codex, got %+v", o)
+		}
+	}
+}
+
 // TestRender_OpencodeOverrideStepRendersNothingForCodex covers a step
 // whose Opencode field names a standing OpencodeAgent persona: per
 // Agent.Opencode's contract, every renderer other than opencode treats

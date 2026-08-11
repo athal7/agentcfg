@@ -517,14 +517,15 @@ mcp_servers:
     transport: local
     command: ["mcp-server-filesystem", "--root", "/tmp"]
 
-  - name: runlayer-slack
+  - name: big-saas-proxy
     transport: remote
-    url: https://slack-mcp.example.com/mcp
-    # Drop this server in projects routed to a small-context local model.
-    # omp mounts every targeted server into its primary session with no
-    # per-role visibility layer, so these tool schemas are a fixed cost on
-    # every turn — enough of them to overflow a small window outright.
-    exclude_for_models: [mlx/default_model, mlx/gemma3-1b]
+    url: https://mcp.example.com/mcp
+    # Drop this server in projects whose `default` class routes to a
+    # small-context local model. omp mounts every targeted server into its
+    # primary session with no per-role visibility layer, so these tool
+    # schemas are a fixed cost on every turn — enough of them to overflow a
+    # small window outright.
+    exclude_for_models: [local/small-model, local/tiny-model]
 ```
 
 | field | yaml tag | type | notes |

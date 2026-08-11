@@ -1227,3 +1227,211 @@ func TestRenderAgentFile_ExcludesToolIDsFromServerNotTargetingOmp(t *testing.T) 
 		t.Errorf("agent file tools: line must not grant mcp__github_search_code (server targets opencode only), got:\n%s", content)
 	}
 }
+
+// TestRenderProject_NoExcludeForModelsMatchOmitsDisabledExtensions covers the
+// no-op case: a project whose resolved classes don't route to any server's
+// exclude_for_models model must get modelRoles only — no disabledExtensions
+// key, and no second output file.
+func TestRenderProject_NoExcludeForModelsMatchOmitsDisabledExtensions(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-opus", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		MCPServers: []registry.MCPServer{
+			{
+				Name:             "remote-one",
+				Transport:        "remote",
+				URL:              registry.Value{Literal: "https://api.example.com/mcp"},
+				ExcludeForModels: []string{"mlx/default_model"},
+			},
+		},
+	}
+
+	classes := map[string]string{"default": "claude-opus", "smol": "claude-haiku"}
+	plan, err := New().(render.ProjectScopeRenderer).RenderProject(classes, reg, "/repo")
+	if err != nil {
+		t.Fatalf("RenderProject returned error: %v", err)
+	}
+
+	if len(plan.Outputs) != 1 {
+		t.Fatalf("got %d outputs, want 1: %#v", len(plan.Outputs), plan.Outputs)
+	}
+
+	cfg := outputByType[render.MergeYAML](t, plan.Outputs)
+	if cfg.Path != "/repo/.omp/config.yml" {
+		t.Errorf("got path %q, want /repo/.omp/config.yml", cfg.Path)
+	}
+	if _, ok := cfg.Object["disabledExtensions"]; ok {
+		t.Errorf("disabledExtensions must be absent when nothing matches, got %#v", cfg.Object)
+	}
+	// Managed must not claim a key this render didn't write, or a later apply
+	// would prune a user's own disabledExtensions entries.
+	for _, k := range cfg.Managed {
+		if k == "disabledExtensions" {
+			t.Error("Managed must not list disabledExtensions when the key is not emitted")
+		}
+	}
+}
+
+// TestRenderProject_ExcludeForModelsMatchDisablesByExtensionID covers the happy
+// path: a project whose resolved classes DO route to an excluded model gets the
+// matching servers listed under disabledExtensions as omp "mcp:<name>" ids —
+// the only lever omp honors, since it reads no <cwd>/.omp/mcp.json and has no
+// per-role MCP visibility layer.
+func TestRenderProject_ExcludeForModelsMatchDisablesByExtensionID(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "mlx/default_model", "smol": "claude-haiku"},
+		Bash:         baseBashPolicy(),
+		MCPServers: []registry.MCPServer{
+			{
+				Name:             "remote-one",
+				Transport:        "remote",
+				URL:              registry.Value{Literal: "https://api.example.com/mcp"},
+				ExcludeForModels: []string{"mlx/default_model"},
+			},
+			{
+				Name:      "remote-two",
+				Transport: "remote",
+				URL:       registry.Value{Literal: "https://api.other.com/mcp"},
+				Tools:     []string{"search", "fetch"},
+				// No exclude_for_models — must stay mounted.
+			},
+		},
+	}
+
+	classes := map[string]string{"default": "mlx/default_model", "smol": "claude-haiku"}
+	plan, err := New().(render.ProjectScopeRenderer).RenderProject(classes, reg, "/repo")
+	if err != nil {
+		t.Fatalf("RenderProject returned error: %v", err)
+	}
+
+	// One file only: omp takes the exclusion through a settings key, not a
+	// separate MCP config, so there is nothing else to write.
+	if len(plan.Outputs) != 1 {
+		t.Fatalf("got %d outputs, want 1: %#v", len(plan.Outputs), plan.Outputs)
+	}
+
+	cfg := outputByType[render.MergeYAML](t, plan.Outputs)
+	if cfg.Path != "/repo/.omp/config.yml" {
+		t.Errorf("got config path %q, want /repo/.omp/config.yml", cfg.Path)
+	}
+
+	got, ok := cfg.Object["disabledExtensions"].([]string)
+	if !ok {
+		t.Fatalf("disabledExtensions missing or wrong type: %#v", cfg.Object["disabledExtensions"])
+	}
+	want := []string{"mcp:remote-one"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("disabledExtensions = %v, want %v", got, want)
+	}
+
+	// modelRoles must still be rendered alongside it.
+	if roles, ok := cfg.Object["modelRoles"].(map[string]string); !ok || roles["default"] != "mlx/default_model" {
+		t.Errorf("modelRoles not rendered correctly: %#v", cfg.Object["modelRoles"])
+	}
+
+	// Both keys must be declared managed so apply owns them.
+	var managedRoles, managedDisabled bool
+	for _, k := range cfg.Managed {
+		switch k {
+		case "modelRoles":
+			managedRoles = true
+		case "disabledExtensions":
+			managedDisabled = true
+		}
+	}
+	if !managedRoles || !managedDisabled {
+		t.Errorf("Managed = %v, want both modelRoles and disabledExtensions", cfg.Managed)
+	}
+}
+
+// TestRenderProject_ServerWithoutExcludeForModelsNeverDisabled covers the
+// invariant: a server with no exclude_for_models — or an explicitly empty one
+// — is never disabled, whatever the project's classes resolve to. Also pins
+// the ordering guarantee, since Go map iteration over classes is random.
+func TestRenderProject_ServerWithoutExcludeForModelsNeverDisabled(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "mlx/default_model", "smol": "mlx/default_model"},
+		Bash:         baseBashPolicy(),
+		MCPServers: []registry.MCPServer{
+			{
+				Name:             "zeta-excluded",
+				Transport:        "remote",
+				URL:              registry.Value{Literal: "https://excluded.example.com/mcp"},
+				ExcludeForModels: []string{"mlx/default_model"},
+			},
+			{
+				Name:      "always-on",
+				Transport: "remote",
+				URL:       registry.Value{Literal: "https://always.example.com/mcp"},
+				// No exclude_for_models at all.
+			},
+			{
+				Name:      "empty-exclude",
+				Transport: "local",
+				Command:   []registry.Value{{Literal: "mcp-server"}},
+				// Empty list must behave exactly like an absent one.
+				ExcludeForModels: []string{},
+			},
+			{
+				Name:             "alpha-excluded",
+				Transport:        "remote",
+				URL:              registry.Value{Literal: "https://alpha.example.com/mcp"},
+				ExcludeForModels: []string{"mlx/default_model"},
+			},
+		},
+	}
+
+	classes := map[string]string{"default": "mlx/default_model", "smol": "mlx/default_model"}
+	plan, err := New().(render.ProjectScopeRenderer).RenderProject(classes, reg, "/repo")
+	if err != nil {
+		t.Fatalf("RenderProject returned error: %v", err)
+	}
+
+	cfg := outputByType[render.MergeYAML](t, plan.Outputs)
+	got, ok := cfg.Object["disabledExtensions"].([]string)
+	if !ok {
+		t.Fatalf("disabledExtensions missing or wrong type: %#v", cfg.Object["disabledExtensions"])
+	}
+
+	// Sorted, and containing only the two servers that opted in.
+	want := []string{"mcp:alpha-excluded", "mcp:zeta-excluded"}
+	if len(got) != len(want) {
+		t.Fatalf("disabledExtensions = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("disabledExtensions = %v, want %v (sorted)", got, want)
+		}
+	}
+}
+
+// TestRenderProject_ExcludeForModelsIgnoresServersNotTargetingOmp pins that the
+// exclusion list is scoped to servers this renderer actually mounts: an
+// opencode-only server is never named in omp's disabledExtensions, because omp
+// never paid for its schemas in the first place.
+func TestRenderProject_ExcludeForModelsIgnoresServersNotTargetingOmp(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "mlx/default_model"},
+		Bash:         baseBashPolicy(),
+		MCPServers: []registry.MCPServer{
+			{
+				Name:             "opencode-only",
+				Transport:        "remote",
+				URL:              registry.Value{Literal: "https://oc.example.com/mcp"},
+				Targets:          []string{"opencode"},
+				ExcludeForModels: []string{"mlx/default_model"},
+			},
+		},
+	}
+
+	classes := map[string]string{"default": "mlx/default_model"}
+	plan, err := New().(render.ProjectScopeRenderer).RenderProject(classes, reg, "/repo")
+	if err != nil {
+		t.Fatalf("RenderProject returned error: %v", err)
+	}
+
+	cfg := outputByType[render.MergeYAML](t, plan.Outputs)
+	if v, ok := cfg.Object["disabledExtensions"]; ok {
+		t.Errorf("disabledExtensions must omit servers not targeting omp, got %#v", v)
+	}
+}

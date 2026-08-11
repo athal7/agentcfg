@@ -516,6 +516,15 @@ mcp_servers:
   - name: local-fs
     transport: local
     command: ["mcp-server-filesystem", "--root", "/tmp"]
+
+  - name: runlayer-slack
+    transport: remote
+    url: https://slack-mcp.example.com/mcp
+    # Drop this server in projects routed to a small-context local model.
+    # omp mounts every targeted server into its primary session with no
+    # per-role visibility layer, so these tool schemas are a fixed cost on
+    # every turn — enough of them to overflow a small window outright.
+    exclude_for_models: [mlx/default_model, mlx/gemma3-1b]
 ```
 
 | field | yaml tag | type | notes |
@@ -527,6 +536,7 @@ mcp_servers:
 | `Targets` | `targets` | `[]string` | which renderer IDs this server applies to; omitted/empty means "every renderer" |
 | `Headers` | `headers` | `map[string]Value` | HTTP headers for a remote server |
 | `Tools` | `tools` | `[]string` | explicit tool-name allowlist, for a harness that enumerates tools individually rather than enabling a whole namespace by glob. Omitted means no such allowlist was declared (see the `mcp_tool_globs` capability in `docs/capabilities.md`) |
+| `ExcludeForModels` | `exclude_for_models` | `[]string` | model identifiers that, when matched by any value in a project's resolved model classes, drop this server for that project. omp's `RenderProject` emits the matches as `mcp:<name>` entries under the project `.omp/config.yml`'s `disabledExtensions`; omp's capability loader drops those servers before dedupe or connection, so their tool schemas never reach the system prompt. Scoped to servers that target omp. Omitted means the server is never excluded. Only omp consumes this — opencode's per-role `tools`/`permission` layer already scopes visibility per role (ADR-0002), so it has no equivalent cost to shed. |
 
 ## `contexts:`
 

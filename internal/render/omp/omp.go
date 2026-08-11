@@ -207,24 +207,82 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 const projectConfigDir, projectConfigFile = ".omp", "config.yml"
 
 // RenderProject implements render.ProjectScopeRenderer: a directory-local
-// config.yml naming the resolved class map under modelRoles. Unlike
-// opencode's RenderProject, omp does NOT get literal model IDs here — omp
-// resolves "@<class>" references against modelRoles at its own runtime
-// (the same "@<class>" syntax renderAgentFile already emits in agent
-// frontmatter for the user-scope config), so the class map itself is the
-// output, not each class's resolved literal. This is the asymmetry the
-// design calls out explicitly between the two harnesses.
-func (r renderer) RenderProject(classes map[string]string, _ *registry.Registry, dir string) (*render.Plan, error) {
+// config.yml naming the resolved class map under modelRoles, plus — when
+// this project's classes route to a model some server declares itself too
+// expensive for — a disabledExtensions list dropping those servers.
+//
+// WHY disabledExtensions AND NOT A PROJECT mcp.json: omp discovers
+// project-level MCP config from <cwd>/mcp.json, <cwd>/.mcp.json, and the
+// foreign-harness paths (.cursor/, .vscode/, .claude.json) — NOT from
+// <cwd>/.omp/mcp.json, so a file written there is silently inert. omp's
+// own MCP capability instead assigns every server the extension id
+// "mcp:<name>" (pi-coding-agent src/capability/mcp.ts, toExtensionId) and
+// the capability loader drops any item whose id appears in the
+// disabledExtensions SETTING before dedupe or connection
+// (src/capability/index.ts). That setting resolves through omp's normal
+// settings layering, where the project .omp/config.yml is merged over the
+// user-scope config, so a project-scoped list wins — verified against
+// omp 17.2.11 with `omp config get disabledExtensions`.
+//
+// This matters because omp has no per-role MCP tool-visibility layer at
+// all (ADR-0002): every server it targets is mounted into the primary
+// session unconditionally, and their tool schemas are a fixed
+// system-prompt cost every turn pays. On a small-context local model that
+// cost can exceed the entire context window, making the model unusable
+// and silently falling the session back to a cloud model. Dropping the
+// server is the only lever omp exposes.
+//
+// Emitted only when at least one server actually matches, so projects on
+// unrestricted models get no key (and no no-op file churn).
+func (r renderer) RenderProject(classes map[string]string, reg *registry.Registry, dir string) (*render.Plan, error) {
+	excluded := excludedServerIDs(reg, classes)
+
+	object := map[string]any{"modelRoles": classes}
+	managed := []string{"modelRoles"}
+	if len(excluded) > 0 {
+		object["disabledExtensions"] = excluded
+		managed = append(managed, "disabledExtensions")
+	}
+
 	return &render.Plan{
 		Outputs: []render.Output{
 			render.MergeYAML{
 				Path:    filepath.Join(dir, projectConfigDir, projectConfigFile),
 				Mode:    0600,
-				Managed: []string{"modelRoles"},
-				Object:  map[string]any{"modelRoles": classes},
+				Managed: managed,
+				Object:  object,
 			},
 		},
 	}, nil
+}
+
+// excludedServerIDs returns the omp extension ids ("mcp:<name>") of every
+// omp-targeting server whose ExcludeForModels names a model any of this
+// project's resolved classes routes to. Sorted so the rendered list is
+// stable across runs (Go map iteration is not).
+func excludedServerIDs(reg *registry.Registry, classes map[string]string) []string {
+	if reg == nil {
+		return nil
+	}
+	routed := make(map[string]bool, len(classes))
+	for _, resolved := range classes {
+		routed[resolved] = true
+	}
+
+	var ids []string
+	for _, s := range reg.MCPServers {
+		if !targets(s.Targets) {
+			continue
+		}
+		for _, model := range s.ExcludeForModels {
+			if routed[model] {
+				ids = append(ids, "mcp:"+s.Name)
+				break
+			}
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // renderAgentFiles builds one WriteFile per omp-targeting agent that isn't

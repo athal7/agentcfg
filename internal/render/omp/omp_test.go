@@ -1405,6 +1405,52 @@ func TestRenderProject_ServerWithoutExcludeForModelsNeverDisabled(t *testing.T) 
 	}
 }
 
+// TestRenderProject_ExcludeForModelsKeyedOnDefaultClassOnly pins the scoping
+// rule: disabledExtensions is session-wide and the cost it sheds is the
+// primary session's, so only the `default` class decides. A project whose
+// default is a large cloud model must keep its whole MCP surface even when a
+// secondary class (here smol) routes to an excluded local model — the
+// over-broad "any class matches" reading is what made this repo's earlier
+// jq-based attempt at the same policy misfire.
+func TestRenderProject_ExcludeForModelsKeyedOnDefaultClassOnly(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "claude-sonnet", "smol": "mlx/default_model"},
+		Bash:         baseBashPolicy(),
+		MCPServers: []registry.MCPServer{
+			{
+				Name:             "expensive",
+				Transport:        "remote",
+				URL:              registry.Value{Literal: "https://api.example.com/mcp"},
+				ExcludeForModels: []string{"mlx/default_model"},
+			},
+		},
+	}
+
+	// default is a 1M-window cloud model; only smol is local.
+	classes := map[string]string{"default": "claude-sonnet", "smol": "mlx/default_model"}
+	plan, err := New().(render.ProjectScopeRenderer).RenderProject(classes, reg, "/repo")
+	if err != nil {
+		t.Fatalf("RenderProject returned error: %v", err)
+	}
+
+	cfg := outputByType[render.MergeYAML](t, plan.Outputs)
+	if v, ok := cfg.Object["disabledExtensions"]; ok {
+		t.Errorf("a non-default class routing to an excluded model must not drop servers, got %#v", v)
+	}
+
+	// Flipping default to the local model must drop it.
+	classes["default"] = "mlx/default_model"
+	plan, err = New().(render.ProjectScopeRenderer).RenderProject(classes, reg, "/repo")
+	if err != nil {
+		t.Fatalf("RenderProject returned error: %v", err)
+	}
+	cfg = outputByType[render.MergeYAML](t, plan.Outputs)
+	got, ok := cfg.Object["disabledExtensions"].([]string)
+	if !ok || len(got) != 1 || got[0] != "mcp:expensive" {
+		t.Errorf("default routing to the excluded model must drop it, got %#v", cfg.Object["disabledExtensions"])
+	}
+}
+
 // TestRenderProject_ExcludeForModelsIgnoresServersNotTargetingOmp pins that the
 // exclusion list is scoped to servers this renderer actually mounts: an
 // opencode-only server is never named in omp's disabledExtensions, because omp

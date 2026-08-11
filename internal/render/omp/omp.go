@@ -206,6 +206,11 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 // file lives inside the project itself.
 const projectConfigDir, projectConfigFile = ".omp", "config.yml"
 
+// defaultClass is the model-class key governing the primary session — the
+// one whose context window has to hold the MCP tool schemas omp mounts
+// unconditionally. See excludedServerIDs.
+const defaultClass = "default"
+
 // RenderProject implements render.ProjectScopeRenderer: a directory-local
 // config.yml naming the resolved class map under modelRoles, plus — when
 // this project's classes route to a model some server declares itself too
@@ -257,16 +262,25 @@ func (r renderer) RenderProject(classes map[string]string, reg *registry.Registr
 }
 
 // excludedServerIDs returns the omp extension ids ("mcp:<name>") of every
-// omp-targeting server whose ExcludeForModels names a model any of this
-// project's resolved classes routes to. Sorted so the rendered list is
-// stable across runs (Go map iteration is not).
+// omp-targeting server whose ExcludeForModels names the model this project's
+// DEFAULT class routes to. Sorted so the rendered list is stable across runs
+// (Go map iteration is not).
+//
+// Keyed on `default` alone, deliberately. disabledExtensions is a
+// session-wide setting and the cost it sheds is the primary session's: omp
+// mounts every targeted server there unconditionally and pays their schemas
+// on every turn. That session runs the default class. Testing ANY class
+// instead would drop the whole MCP surface from a project whose primary
+// model is a 1M-window cloud model merely because its `smol` class points
+// at a small local one — which is exactly the over-broad match that made
+// this repo's previous, jq-based attempt at the same policy misfire.
 func excludedServerIDs(reg *registry.Registry, classes map[string]string) []string {
 	if reg == nil {
 		return nil
 	}
-	routed := make(map[string]bool, len(classes))
-	for _, resolved := range classes {
-		routed[resolved] = true
+	primary, ok := classes[defaultClass]
+	if !ok || primary == "" {
+		return nil
 	}
 
 	var ids []string
@@ -275,7 +289,7 @@ func excludedServerIDs(reg *registry.Registry, classes map[string]string) []stri
 			continue
 		}
 		for _, model := range s.ExcludeForModels {
-			if routed[model] {
+			if model == primary {
 				ids = append(ids, "mcp:"+s.Name)
 				break
 			}

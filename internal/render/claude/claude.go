@@ -328,13 +328,16 @@ func (r renderer) RenderProject(classes map[string]string, reg *registry.Registr
 			Content: []byte(renderAgentFile(reg, a, model, body)),
 		})
 	}
-	if len(agentFiles) > 0 {
-		outputs = append(outputs, render.RebuildDir{
-			Dir:   filepath.Join(dir, projectAgentsDir),
-			Glob:  "*.md",
-			Files: agentFiles,
-		})
-	}
+	// Unconditional, even when agentFiles is empty: RebuildDir is the
+	// pruning mechanism for this directory, so a project that drops
+	// its last class-bearing agent (or opts every agent out of claude)
+	// must still clear a stale file that would otherwise keep pinning
+	// an old model and prompt body for that subagent name.
+	outputs = append(outputs, render.RebuildDir{
+		Dir:   filepath.Join(dir, projectAgentsDir),
+		Glob:  "*.md",
+		Files: agentFiles,
+	})
 
 	return &render.Plan{Outputs: outputs}, nil
 }

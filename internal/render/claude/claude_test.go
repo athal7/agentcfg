@@ -317,9 +317,9 @@ func TestRender_TargetsOptOut(t *testing.T) {
 
 // TestRender_BashAndExternalDirectoryDropSilently confirms bash policy
 // and external_directory are never rendered (see Capabilities' shared
-// category-precedence doc note) and, per existing precedent (codex
-// treats per-agent bash identically), that this produces no gap for bash
-// specifically — only external_directory has a DetectGaps detector.
+// category-precedence doc note), and that both omissions are reported:
+// DetectGaps emits a per_agent_bash_policy skip and an
+// external_directory_policy gap, matching codex's identical treatment.
 func TestRender_BashAndExternalDirectoryDropSilently(t *testing.T) {
 	reg := &registry.Registry{
 		ModelClasses: map[string]string{"default": "sonnet"},

@@ -46,11 +46,13 @@ flag set (`--scope`, `--context`, `--strict`, ...).
 ## Running agentcfg in a sandbox
 
 Set `HOME` to a sandbox directory before running any `agentcfg` command
-to confine every read and write it does to that sandbox, instead of the
-host's real `~/.config/agentcfg`; point `AGENTCFG_REGISTRY`/`--registry`
-at the sandboxed registry too if it doesn't live under that `HOME`. See
-[`AGENTS.md`](AGENTS.md) for the full workflow and the registry file
-layout an agent needs to edit one.
+to confine its default registry lookup and every `HOME`-derived output
+path to that sandbox, instead of the host's real `~/.config/agentcfg`.
+An explicit `AGENTCFG_REGISTRY`/`--registry` outside that `HOME` still
+gets read from wherever it lives — point it at a registry inside the
+sandbox too if you want the whole workflow, reads and writes alike,
+confined to one directory. See [`AGENTS.md`](AGENTS.md) for the full
+workflow and the registry file layout an agent needs to edit one.
 
 ## Managing your registry
 

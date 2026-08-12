@@ -51,11 +51,16 @@ agentcfg apply                # 3. write native config for every registered harn
 
 A harness running in an Agent of Empires-style isolated sandbox should
 never read or write the host's real `~/.config/agentcfg` or other host
-home-directory paths. `agentcfg` already resolves every path it reads or
-writes through `$HOME` (directly, or via `os.UserHomeDir()`), so setting
-`HOME` to a sandbox directory before running any `agentcfg` command
-confines every default-derived read and write to that sandbox — no new
-flag, environment variable, or mode is needed.
+home-directory paths. `agentcfg` resolves its default registry location
+and every output path through `$HOME` (directly, or via
+`os.UserHomeDir()`), so setting `HOME` to a sandbox directory before
+running any `agentcfg` command confines the default registry lookup and
+every `HOME`-derived output path to that sandbox — no new flag,
+environment variable, or mode is needed for that part of the workflow.
+An explicit `AGENTCFG_REGISTRY` or `--registry` path is a separate
+input: if it points outside the sandboxed `HOME`, `agentcfg` still reads
+that registry from wherever it lives, so it remains an external input
+the sandbox doesn't confine.
 
 ```sh
 export HOME=/path/to/sandbox
@@ -67,10 +72,13 @@ agentcfg apply --target opencode
 `AGENTCFG_REGISTRY` (or `--registry`) can point at a registry directory
 outside that sandboxed `HOME` — e.g. a registry checked into the
 sandboxed project's own repo, resolved from a path `HOME` doesn't cover.
-Doing so doesn't break output confinement: `apply`'s writes are resolved
-against `HOME`, not the registry directory, so they still land under the
-sandbox regardless of where the registry itself lives. Still, prefer a
-registry that lives inside the same sandbox directory as `HOME` when you
-have the choice — it keeps every path this workflow touches, reads and
-writes alike, confined to one directory you can inspect or discard as a
-whole, rather than trusting that no future read is added outside `HOME`.
+Doing so doesn't break *output* confinement: `apply`'s writes are
+resolved against `HOME`, not the registry directory, so they still land
+under the sandbox regardless of where the registry itself lives. The
+registry read itself, though, is then an external input outside the
+sandbox's control rather than something `HOME` confines. Still, prefer
+a registry that lives inside the same sandbox directory as `HOME` when
+you have the choice — it keeps every path this workflow touches, reads
+and writes alike, confined to one directory you can inspect or discard
+as a whole, for full confinement, rather than trusting that no future
+read is added outside `HOME`.

@@ -15,105 +15,125 @@ import (
 // sandbox-local workflow documented in AGENTS.md/README.md end to end
 // through the real agentcfg command tree (newRootCmd, not a helper
 // function): with HOME and AGENTCFG_REGISTRY both pointed at paths inside
-// one fresh sandbox, validate -> render --explain -> apply must all
-// succeed and touch no path outside that sandbox. --target opencode
-// scopes every render/apply to the one renderer that never shells out to
-// a harness's own CLI, so the test never invokes a real external harness
-// binary.
+// one fresh sandbox, validate -> render --explain -> apply must each run
+// in turn, with validate and render --explain writing nothing anywhere
+// and apply writing only inside the sandbox. The test never touches the
+// real process home directory — a second, independent t.TempDir() stands
+// in for "some other home-directory tree" the run must never touch, and
+// every filesystem check stays confined to the two temp dirs. --target
+// opencode scopes every render/apply to the one renderer that never
+// shells out to a harness's own CLI, so the test never invokes a real
+// external harness binary.
 func TestSandboxWorkflow_ConfinesValidateRenderApplyToSandbox(t *testing.T) {
-	realHome, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("os.UserHomeDir() before sandboxing: %v", err)
-	}
-	realOpencodeConfig := filepath.Join(realHome, ".config", "opencode", "opencode.json")
-	realConfigBefore := snapshotFile(t, realOpencodeConfig)
+	processHome := os.Getenv("HOME")
 
+	simulatedHostHome := t.TempDir()
 	sandbox := t.TempDir()
+	if simulatedHostHome == processHome || sandbox == processHome {
+		t.Fatalf("t.TempDir() collided with the real process HOME %q; refusing to run", processHome)
+	}
+
 	registryDir := filepath.Join(sandbox, "registry")
 	if err := runInit(io.Discard, registryDir); err != nil {
 		t.Fatalf("runInit(%q) failed: %v", registryDir, err)
 	}
-	sandboxFilesBefore := sandboxFilePaths(t, sandbox)
+	hostHomeBefore := treeSnapshot(t, simulatedHostHome)
+	sandboxBaseline := treeSnapshot(t, sandbox)
 
 	t.Setenv("HOME", sandbox)
 	t.Setenv("AGENTCFG_REGISTRY", registryDir)
 
-	for _, args := range [][]string{
-		{"validate"},
-		{"render", "--explain", "--target", "opencode"},
-		{"apply", "--target", "opencode"},
-	} {
-		var out bytes.Buffer
-		root := newRootCmd()
-		root.SetOut(&out)
-		root.SetErr(&out)
-		root.SetArgs(args)
-		if err := root.Execute(); err != nil {
-			t.Fatalf("agentcfg %v failed: %v\noutput:\n%s", args, err, out.String())
-		}
+	runAgentcfg(t, "validate")
+	if after := treeSnapshot(t, sandbox); !treesEqual(sandboxBaseline, after) {
+		t.Fatalf("validate wrote to the sandbox; before=%+v after=%+v", sandboxBaseline, after)
 	}
 
-	sandboxFilesAfter := sandboxFilePaths(t, sandbox)
-	for _, path := range sandboxFilesAfter {
-		rel, err := filepath.Rel(sandbox, path)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			t.Errorf("path %q written by the sandboxed run resolves outside sandbox %q", path, sandbox)
-		}
+	explainOut := runAgentcfg(t, "render", "--explain", "--target", "opencode")
+	if after := treeSnapshot(t, sandbox); !treesEqual(sandboxBaseline, after) {
+		t.Fatalf("render --explain wrote to the sandbox; before=%+v after=%+v", sandboxBaseline, after)
 	}
-	if len(sandboxFilesAfter) <= len(sandboxFilesBefore) {
-		t.Fatalf("expected apply to create at least one new file under the sandbox; before=%d after=%d files", len(sandboxFilesBefore), len(sandboxFilesAfter))
+	if !strings.Contains(explainOut, "== opencode") || !strings.Contains(explainOut, "opencode.json") {
+		t.Fatalf("render --explain output missing the expected opencode plan:\n%s", explainOut)
 	}
 
+	runAgentcfg(t, "apply", "--target", "opencode")
+
+	sandboxAfterApply := treeSnapshot(t, sandbox)
+	if len(sandboxAfterApply) <= len(sandboxBaseline) {
+		t.Fatalf("expected apply to create at least one new file under the sandbox; before=%d after=%d files", len(sandboxBaseline), len(sandboxAfterApply))
+	}
 	appliedConfig := filepath.Join(sandbox, ".config", "opencode", "opencode.json")
-	if _, err := os.Stat(appliedConfig); err != nil {
-		t.Fatalf("expected apply to write %s inside the sandbox: %v", appliedConfig, err)
+	if _, ok := sandboxAfterApply[filepath.Join(".config", "opencode", "opencode.json")]; !ok {
+		t.Fatalf("expected apply to write %s inside the sandbox", appliedConfig)
 	}
 
-	realConfigAfter := snapshotFile(t, realOpencodeConfig)
-	if realConfigAfter != realConfigBefore {
-		t.Fatalf("real home config %s changed during a sandboxed run: before=%+v after=%+v", realOpencodeConfig, realConfigBefore, realConfigAfter)
+	if after := treeSnapshot(t, simulatedHostHome); !treesEqual(hostHomeBefore, after) {
+		t.Fatalf("simulated host home changed during a sandboxed run: before=%+v after=%+v", hostHomeBefore, after)
 	}
 }
 
-// fileSnapshot records enough about a path to detect any create, modify,
-// or remove without depending on file content: a size or mtime change
-// catches a modification, and exists flipping catches a create/remove.
+// runAgentcfg executes newRootCmd with args, failing the test on any
+// error and returning everything the command wrote to stdout/stderr.
+func runAgentcfg(t *testing.T, args ...string) string {
+	t.Helper()
+	var out bytes.Buffer
+	root := newRootCmd()
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs(args)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("agentcfg %v failed: %v\noutput:\n%s", args, err, out.String())
+	}
+	return out.String()
+}
+
+// fileSnapshot records enough about a path to detect a modification
+// without depending on file content: a size or mtime change catches it.
 type fileSnapshot struct {
-	exists  bool
 	size    int64
 	modTime time.Time
 }
 
-// snapshotFile stats path, treating a missing file as a valid (absent)
-// snapshot rather than a test failure — the real-home opencode.json this
-// test guards is not expected to exist on every machine that runs it.
-func snapshotFile(t *testing.T, path string) fileSnapshot {
+// treeSnapshot maps every regular file under root, keyed by its path
+// relative to root, to a fileSnapshot — for detecting any create,
+// modify, or remove under root between two points in a test.
+func treeSnapshot(t *testing.T, root string) map[string]fileSnapshot {
 	t.Helper()
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fileSnapshot{}
-		}
-		t.Fatalf("stat %q: %v", path, err)
-	}
-	return fileSnapshot{exists: true, size: info.Size(), modTime: info.ModTime()}
-}
-
-// sandboxFilePaths lists every regular file under root, for diffing the
-// sandbox tree before and after a run.
-func sandboxFilePaths(t *testing.T, root string) []string {
-	t.Helper()
-	var files []string
+	snap := make(map[string]fileSnapshot)
 	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !d.IsDir() {
-			files = append(files, path)
+		if d.IsDir() {
+			return nil
 		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		snap[rel] = fileSnapshot{size: info.Size(), modTime: info.ModTime()}
 		return nil
 	}); err != nil {
 		t.Fatalf("walking %q: %v", root, err)
 	}
-	return files
+	return snap
+}
+
+// treesEqual reports whether two treeSnapshot results describe the same
+// set of files with the same size and modification time.
+func treesEqual(a, b map[string]fileSnapshot) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for path, snapA := range a {
+		snapB, ok := b[path]
+		if !ok || snapA.size != snapB.size || !snapA.modTime.Equal(snapB.modTime) {
+			return false
+		}
+	}
+	return true
 }

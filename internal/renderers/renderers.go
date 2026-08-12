@@ -7,6 +7,7 @@ package renderers
 
 import (
 	"github.com/athal7/agentcfg/internal/render"
+	"github.com/athal7/agentcfg/internal/render/claude"
 	"github.com/athal7/agentcfg/internal/render/codex"
 	"github.com/athal7/agentcfg/internal/render/omp"
 	"github.com/athal7/agentcfg/internal/render/opencode"
@@ -16,6 +17,7 @@ import (
 // adding exactly one line here — nothing else changes.
 func All() []render.Renderer {
 	return []render.Renderer{
+		claude.New(),
 		codex.New(),
 		opencode.New(),
 		omp.New(),

@@ -95,7 +95,7 @@ harnesses:
     bash_profile: lead
 ```
 
-A map from harness/renderer ID (`opencode`, `omp`, `codex`) to a `HarnessConfig`:
+A map from harness/renderer ID (`opencode`, `omp`, `codex`, `claude`) to a `HarnessConfig`:
 
 | field | yaml tag | type | meaning |
 |---|---|---|---|

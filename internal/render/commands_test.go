@@ -28,7 +28,7 @@ func TestRenderCommands_InlineText(t *testing.T) {
 		},
 	}
 
-	tree, err := RenderCommands(reg, fixtureReadFile(nil))
+	tree, err := RenderCommands(CommandsSkillsDir, reg, fixtureReadFile(nil))
 	if err != nil {
 		t.Fatalf("RenderCommands() error = %v", err)
 	}
@@ -62,7 +62,7 @@ func TestRenderCommands_FileBackedPrompt(t *testing.T) {
 		},
 	}
 
-	tree, err := RenderCommands(reg, fixtureReadFile(map[string]string{
+	tree, err := RenderCommands(CommandsSkillsDir, reg, fixtureReadFile(map[string]string{
 		"/registry/prompts/review.md": "Review the diff for correctness.",
 	}))
 	if err != nil {
@@ -82,7 +82,7 @@ func TestRenderCommands_ReadFileErrorPropagates(t *testing.T) {
 		},
 	}
 
-	_, err := RenderCommands(reg, fixtureReadFile(nil))
+	_, err := RenderCommands(CommandsSkillsDir, reg, fixtureReadFile(nil))
 	if err == nil {
 		t.Fatal("expected an error for an unreadable prompt file, got nil")
 	}
@@ -96,7 +96,7 @@ func TestRenderCommands_MultipleCommandsEachOwnDirectory(t *testing.T) {
 		},
 	}
 
-	tree, err := RenderCommands(reg, fixtureReadFile(nil))
+	tree, err := RenderCommands(CommandsSkillsDir, reg, fixtureReadFile(nil))
 	if err != nil {
 		t.Fatalf("RenderCommands() error = %v", err)
 	}
@@ -129,7 +129,7 @@ func TestRenderCommands_MultiStepAlwaysIncludesWorkflowzDirective(t *testing.T) 
 		},
 	}
 
-	tree, err := RenderCommands(reg, fixtureReadFile(nil))
+	tree, err := RenderCommands(CommandsSkillsDir, reg, fixtureReadFile(nil))
 	if err != nil {
 		t.Fatalf("RenderCommands() error = %v", err)
 	}
@@ -150,7 +150,7 @@ func TestRenderCommands_FlatCommandNeverGetsWorkflowzDirective(t *testing.T) {
 		},
 	}
 
-	tree, err := RenderCommands(reg, fixtureReadFile(nil))
+	tree, err := RenderCommands(CommandsSkillsDir, reg, fixtureReadFile(nil))
 	if err != nil {
 		t.Fatalf("RenderCommands() error = %v", err)
 	}
@@ -162,7 +162,7 @@ func TestRenderCommands_FlatCommandNeverGetsWorkflowzDirective(t *testing.T) {
 }
 
 func TestRenderCommands_NoCommandsStillReturnsTree(t *testing.T) {
-	tree, err := RenderCommands(&registry.Registry{}, fixtureReadFile(nil))
+	tree, err := RenderCommands(CommandsSkillsDir, &registry.Registry{}, fixtureReadFile(nil))
 	if err != nil {
 		t.Fatalf("RenderCommands() error = %v", err)
 	}

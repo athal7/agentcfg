@@ -15,29 +15,35 @@ import (
 // OMP-native location" — reads the identical path. Because both harnesses
 // resolve the exact same location, rendering a command needs no
 // per-harness translation: internal/render/opencode and
-// internal/render/omp both call RenderCommands and get back the exact
-// same RebuildTree (see docs/schema.md's commands: section for the
-// confirmed discovery parity this relies on).
+// internal/render/omp both call RenderCommands with this same dir and
+// get back the exact same RebuildTree (see docs/schema.md's commands:
+// section for the confirmed discovery parity this relies on). Claude
+// Code has its own, separate skill roots (`~/.claude/skills/` and
+// `.claude/skills/`, per code.claude.com/docs/en/skills) — it does not
+// read this path at all — so internal/render/claude calls RenderCommands
+// with its own dir constant instead of this one.
 const CommandsSkillsDir = "~/.agents/skills"
 
 // RenderCommands builds the RebuildTree that (re)writes every registry
-// command as an Agent Skills SKILL.md file under CommandsSkillsDir,
-// pruning any previously-rendered command no longer present in the
-// registry. Called identically from every renderer that declares
-// CapCustomCommands — currently both internal/render/opencode and
-// internal/render/omp — so a command's rendered content and path never
-// depend on which renderer produced it. This is load-bearing: both
-// renderers' plans write the SAME shared path, applied independently
+// command as an Agent Skills SKILL.md file under dir, pruning any
+// previously-rendered command no longer present in the registry. Called
+// identically (with the caller's own harness-native skills dir) from
+// every renderer that declares CapCustomCommands — currently
+// internal/render/opencode and internal/render/omp share CommandsSkillsDir,
+// while internal/render/claude passes its own dir — so a command's
+// rendered content never depends on which renderer produced it, even
+// though the dir can differ. This is load-bearing for opencode/omp
+// specifically: both write the SAME shared path, applied independently
 // (in whichever order `apply --target` runs them), so content can never
 // vary by which renderer is asking — a renderer-conditional workflowz
 // injection would silently flip depending on apply order. A multi-step
 // command's body always includes the workflowz directive (see
 // workflowzDirective): inert, harmless extra prose on a renderer that
-// doesn't recognize it (opencode), and the deterministic-pipeline
+// doesn't recognize it (opencode, claude), and the deterministic-pipeline
 // trigger on one that does (omp) — see CapStructuredWorkflowCommand for
 // the informational-only capability that reports this per-harness
 // fidelity difference without touching rendered content.
-func RenderCommands(reg *registry.Registry, readFile func(string) ([]byte, error)) (RebuildTree, error) {
+func RenderCommands(dir string, reg *registry.Registry, readFile func(string) ([]byte, error)) (RebuildTree, error) {
 	dirs := make(map[string][]WriteFile, len(reg.Commands))
 	for _, c := range reg.Commands {
 		body, err := commandBody(c, readFile)
@@ -50,7 +56,7 @@ func RenderCommands(reg *registry.Registry, readFile func(string) ([]byte, error
 			Content: []byte(renderSkillFile(c, body)),
 		}}
 	}
-	return RebuildTree{Dir: CommandsSkillsDir, Dirs: dirs}, nil
+	return RebuildTree{Dir: dir, Dirs: dirs}, nil
 }
 
 // workflowzDirective is unconditionally prepended to every structured

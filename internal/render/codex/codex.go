@@ -218,7 +218,7 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 		})
 	}
 
-	commandsTree, err := render.RenderCommands(reg, readFile)
+	commandsTree, err := render.RenderCommands(render.CommandsSkillsDir, reg, readFile)
 	if err != nil {
 		return nil, fmt.Errorf("codex: rendering commands: %w", err)
 	}

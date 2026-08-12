@@ -43,12 +43,24 @@ failed. Use `--target opencode` (or `--target omp`, `--target codex`, `--target 
 one harness. See `agentcfg apply --help` and `docs/wiring.md` for the full
 flag set (`--scope`, `--context`, `--strict`, ...).
 
+## Running agentcfg in a sandbox
+
+Set `HOME` to a sandbox directory before running any `agentcfg` command
+to confine every read and write it does to that sandbox, instead of the
+host's real `~/.config/agentcfg`; point `AGENTCFG_REGISTRY`/`--registry`
+at the sandboxed registry too if it doesn't live under that `HOME`. See
+[`AGENTS.md`](AGENTS.md) for the full workflow and the registry file
+layout an agent needs to edit one.
+
 ## Managing your registry
 
 The registry is just a directory of YAML files at `~/.config/agentcfg/`. Edit the files directly, or manage them with whatever you already use for config files — a dotfiles manager like chezmoi, a plain git checkout, symlinks — `agentcfg` neither knows nor cares which.
 
 ## Documentation
 
+- [`AGENTS.md`](AGENTS.md) — the canonical, agent-facing reference for the
+  registry file layout and the `validate`/`render --explain`/`apply`
+  workflow, including how to run it fully confined to a sandbox.
 - [`docs/schema.md`](docs/schema.md) — the registry file layout and every
   field it supports, generated from the actual Go schema.
 - [`docs/capabilities.md`](docs/capabilities.md) — a generated matrix of

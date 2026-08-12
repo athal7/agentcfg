@@ -99,6 +99,38 @@ func TestProject_ContextMatchOverridesSomeClasses(t *testing.T) {
 		t.Errorf("reg.ModelClasses was mutated: %v", reg.ModelClasses)
 	}
 }
+func TestProject_HarnessAndContextClassesUseSpecificityOrder(t *testing.T) {
+	withResolveContext(t, func(ctx context.Context, dir string) (*contextres.RemoteInfo, error) {
+		return &contextres.RemoteInfo{Host: "github.com", Owner: "athal7"}, nil
+	})
+
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "root-default", "smol": "root-smol", "big": "root-big"},
+		Harnesses: map[string]registry.HarnessConfig{
+			"opencode": {ModelClasses: map[string]string{"default": "harness-default", "smol": "harness-smol"}},
+		},
+		Contexts: []registry.Context{
+			{
+				Match:        registry.ContextMatch{GitRemoteOwner: "athal7"},
+				ModelClasses: map[string]string{"default": "context-default"},
+			},
+		},
+	}
+
+	var captured map[string]string
+	renderers := []render.Renderer{
+		fakeProjectRenderer{fakeRenderer: fakeRenderer{id: "opencode"}, captured: &captured},
+	}
+
+	if _, err := Project(reg, renderers, "/repo"); err != nil {
+		t.Fatalf("Project returned error: %v", err)
+	}
+
+	want := map[string]string{"default": "context-default", "smol": "harness-smol", "big": "root-big"}
+	if !reflect.DeepEqual(captured, want) {
+		t.Errorf("got classes %v, want %v", captured, want)
+	}
+}
 
 func TestProject_NoContextMatchUsesRegistryDefaults(t *testing.T) {
 	withResolveContext(t, func(ctx context.Context, dir string) (*contextres.RemoteInfo, error) {

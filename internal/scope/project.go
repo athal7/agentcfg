@@ -25,23 +25,24 @@ var resolveContext = func(ctx context.Context, dir string) (*contextres.RemoteIn
 }
 
 // Project resolves dir's context (if any) against reg.Contexts, merges the
-// matched context's ModelClasses over a copy of the registry's own
-// default model classes (partial, per-key override — a context need not
-// name every class), and calls RenderProject on every renderer in
-// renderers that implements render.ProjectScopeRenderer. A renderer that
-// doesn't implement the interface is not an error: Project appends a
-// render.Gap for it instead and moves on.
+// matched context's ModelClasses over each renderer's effective base
+// (root model_classes + harness-level model_classes overrides), and calls
+// RenderProject on every renderer in renderers that implements
+// render.ProjectScopeRenderer. Resolution order per renderer:
+//
+//  1. Root model_classes (global base)
+//  2. HarnessConfig.ModelClasses for that renderer's harness (harness override)
+//  3. First matching Context's ModelClasses (project-specific, most specific)
+//
+// A renderer that doesn't implement the interface is not an error: Project
+// appends a render.Gap for it instead and moves on.
 //
 // "No git remote at all" and "a git remote that matches no configured
 // Context" are deliberately NOT distinguished here — both simply mean
-// "render project scope using the registry's own default classes,
-// unmodified." This is a normal outcome, not a failure: every
-// ProjectScopeRenderer is still called in both cases, with the plain
-// registry defaults. Only an actual error from a renderer's RenderProject
-// call propagates as a Go error — a renderer that doesn't support project
-// scope at all is a Gap, not a failure.
+// "render project scope using the registry and harness defaults,
+// unmodified." This is a normal outcome, not a failure.
 func Project(reg *registry.Registry, renderers []render.Renderer, dir string) (*render.Plan, error) {
-	classes := resolveClasses(reg, dir)
+	contextDelta := resolveContextDelta(reg, dir)
 
 	plan := &render.Plan{}
 	for _, r := range renderers {
@@ -56,6 +57,7 @@ func Project(reg *registry.Registry, renderers []render.Renderer, dir string) (*
 			continue
 		}
 
+		classes := classesForRenderer(reg, r.ID(), contextDelta)
 		sub, err := pr.RenderProject(classes, reg, dir)
 		if err != nil {
 			return nil, fmt.Errorf("scope: rendering project scope for %s: %w", r.ID(), err)
@@ -67,30 +69,29 @@ func Project(reg *registry.Registry, renderers []render.Renderer, dir string) (*
 	return plan, nil
 }
 
-// resolveClasses determines the effective model-class map for dir: a copy
-// of the registry's own defaults (reg.ModelClasses is never mutated),
-// with the first matching Context's ModelClasses overlaid key-by-key on
-// top. reg.Contexts is checked in order; the first match wins.
-func resolveClasses(reg *registry.Registry, dir string) map[string]string {
-	classes := make(map[string]string, len(reg.ModelClasses))
-	for k, v := range reg.ModelClasses {
+// classesForRenderer builds the effective class map for one renderer:
+// root model_classes, then harness overrides, then context delta.
+func classesForRenderer(reg *registry.Registry, harness string, contextDelta map[string]string) map[string]string {
+	classes := reg.EffectiveModelClasses(harness)
+	for k, v := range contextDelta {
 		classes[k] = v
 	}
+	return classes
+}
 
+// resolveContextDelta returns only the matching Context's ModelClasses (the
+// per-project delta), or nil when no context matches or the remote is
+// unresolvable. Callers overlay this onto their own effective base.
+func resolveContextDelta(reg *registry.Registry, dir string) map[string]string {
 	remote, err := resolveContext(context.Background(), dir)
 	if err != nil || remote == nil {
-		return classes
+		return nil
 	}
-
 	for _, c := range reg.Contexts {
 		if !c.Matches(remote.Host, remote.Owner) {
 			continue
 		}
-		for k, v := range c.ModelClasses {
-			classes[k] = v
-		}
-		break
+		return c.ModelClasses
 	}
-
-	return classes
+	return nil
 }

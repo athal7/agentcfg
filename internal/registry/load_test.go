@@ -150,6 +150,24 @@ func TestLoad_HappyPath(t *testing.T) {
 		t.Fatalf("Contexts = %+v", reg.Contexts)
 	}
 }
+func TestLoad_HarnessModelClasses(t *testing.T) {
+	reg, errs, warns, err := loadFixture(t, map[string]string{
+		"agentcfg.yaml": `
+version: 1
+harnesses:
+  opencode:
+    model_classes:
+      default: openai/gpt-5.6-terra
+      smol: openai/gpt-5.6-mini
+`,
+	})
+	requireNoProblems(t, errs, warns, err)
+
+	want := map[string]string{"default": "openai/gpt-5.6-terra", "smol": "openai/gpt-5.6-mini"}
+	if !reflect.DeepEqual(reg.Harnesses["opencode"].ModelClasses, want) {
+		t.Errorf("Harnesses[opencode].ModelClasses = %v, want %v", reg.Harnesses["opencode"].ModelClasses, want)
+	}
+}
 
 func TestLoad_MissingEntryFile(t *testing.T) {
 	dir := t.TempDir()

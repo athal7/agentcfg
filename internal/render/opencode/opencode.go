@@ -89,15 +89,15 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 	if readFile == nil {
 		readFile = os.ReadFile
 	}
-
 	globalBash, err := bashpolicy.Compile(reg.Bash, globalBashProfile)
 	if err != nil {
-		return nil, fmt.Errorf("opencode: compiling global bash policy: %w", err)
+		return nil, fmt.Errorf("opencode: global bash profile: %w", err)
 	}
 
+	classes := reg.EffectiveModelClasses("opencode")
 	obj := map[string]any{
-		"model":       reg.ModelClasses["default"],
-		"small_model": reg.ModelClasses["smol"],
+		"model":       classes["default"],
+		"small_model": classes["smol"],
 		"permission":  renderGlobalPermission(globalBash),
 	}
 
@@ -124,7 +124,7 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 			if !ok {
 				continue
 			}
-			agentObj, err := renderOpencodeAgentPersona(reg, oa, a.Role, a.Steps)
+			agentObj, err := renderOpencodeAgentPersona(reg, classes, oa, a.Role, a.Steps)
 			if err != nil {
 				return nil, err
 			}
@@ -132,7 +132,7 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 			renderedOpencodeAgents[a.Opencode.Agent] = true
 			continue
 		}
-		agentObj, err := renderAgent(reg, a)
+		agentObj, err := renderAgent(reg, classes, a)
 		if err != nil {
 			return nil, err
 		}
@@ -322,7 +322,7 @@ func agentBashMap(reg *registry.Registry, b registry.BashPermission) (map[string
 // renderAgent builds the opencode agent object for a single registry.Agent,
 // including its permission block (bash from agentBashMap, task/edit/write
 // from Permissions, external_directory, and MCP tool/ask settings).
-func renderAgent(reg *registry.Registry, a registry.Agent) (map[string]any, error) {
+func renderAgent(reg *registry.Registry, classes map[string]string, a registry.Agent) (map[string]any, error) {
 	bashMap, err := agentBashMap(reg, a.Permissions.Bash)
 	if err != nil {
 		return nil, fmt.Errorf("opencode: agent %q: %w", a.Name, err)
@@ -359,7 +359,7 @@ func renderAgent(reg *registry.Registry, a registry.Agent) (map[string]any, erro
 	agentObj := map[string]any{
 		"description": a.Description,
 		"mode":        opencodeMode,
-		"model":       reg.ModelClasses[a.Class],
+		"model":       classes[a.Class],
 		"prompt":      renderPrompt(a),
 		"permission":  perm,
 	}
@@ -402,7 +402,7 @@ func findOpencodeAgent(reg *registry.Registry, name string) (registry.OpencodeAg
 // Permissions/MCP) comes from oa itself, never the referencing step; only
 // mode and steps come from the step's own role/steps, since those are
 // workflow-level concepts OpencodeAgent has no field for.
-func renderOpencodeAgentPersona(reg *registry.Registry, oa registry.OpencodeAgent, role string, steps *int) (map[string]any, error) {
+func renderOpencodeAgentPersona(reg *registry.Registry, classes map[string]string, oa registry.OpencodeAgent, role string, steps *int) (map[string]any, error) {
 	bashMap, err := agentBashMap(reg, oa.Permissions.Bash)
 	if err != nil {
 		return nil, fmt.Errorf("opencode: agent %q: %w", oa.Name, err)
@@ -439,7 +439,7 @@ func renderOpencodeAgentPersona(reg *registry.Registry, oa registry.OpencodeAgen
 	agentObj := map[string]any{
 		"description": oa.Description,
 		"mode":        opencodeMode,
-		"model":       reg.ModelClasses[oa.Class],
+		"model":       classes[oa.Class],
 		"prompt":      renderOpencodeAgentPrompt(oa),
 		"permission":  perm,
 	}

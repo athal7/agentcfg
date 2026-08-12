@@ -129,7 +129,8 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 		readFile = os.ReadFile
 	}
 
-	agentFiles, agentGaps, err := renderAgentFiles(reg, readFile)
+	classes := reg.EffectiveModelClasses("codex")
+	agentFiles, agentGaps, err := renderAgentFiles(classes, reg, readFile)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +178,7 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 	var managed []string
 
 	if primary != nil {
-		if model := reg.ModelClasses[primary.Class]; model != "" {
+		if model := classes[primary.Class]; model != "" {
 			configObj["model"] = model
 			managed = append(managed, "model")
 		}
@@ -296,7 +297,7 @@ func isStandaloneAgent(reg *registry.Registry, a registry.Agent) bool {
 // sandbox_mode/developer_instructions per developers.openai.com/codex/
 // subagents' documented custom-agent-file schema. Paths are relative to
 // agentsDir, per RebuildDir's documented convention.
-func renderAgentFiles(reg *registry.Registry, readFile func(string) ([]byte, error)) ([]render.WriteFile, []render.Gap, error) {
+func renderAgentFiles(classes map[string]string, reg *registry.Registry, readFile func(string) ([]byte, error)) ([]render.WriteFile, []render.Gap, error) {
 	var files []render.WriteFile
 	var gaps []render.Gap
 	for _, a := range reg.Agents {
@@ -307,7 +308,7 @@ func renderAgentFiles(reg *registry.Registry, readFile func(string) ([]byte, err
 		if err != nil {
 			return nil, nil, fmt.Errorf("codex: agent %q: %w", a.Name, err)
 		}
-		content, err := toml.Marshal(renderAgentFile(reg, a, body))
+		content, err := toml.Marshal(renderAgentFile(classes, reg, a, body))
 		if err != nil {
 			return nil, nil, fmt.Errorf("codex: agent %q: encoding TOML: %w", a.Name, err)
 		}
@@ -359,7 +360,7 @@ func composedSections(reg *registry.Registry, readFile func(string) ([]byte, err
 // optional model (resolved from Class) and sandbox_mode (derived from
 // Permissions — see sandboxMode), and developer_instructions (the
 // agent's full prompt body).
-func renderAgentFile(reg *registry.Registry, a registry.Agent, body string) map[string]any {
+func renderAgentFile(classes map[string]string, reg *registry.Registry, a registry.Agent, body string) map[string]any {
 	description := a.Description
 	if description == "" {
 		description = a.Name
@@ -369,7 +370,7 @@ func renderAgentFile(reg *registry.Registry, a registry.Agent, body string) map[
 		"description":            description,
 		"developer_instructions": body,
 	}
-	if model := reg.ModelClasses[a.Class]; model != "" {
+	if model := classes[a.Class]; model != "" {
 		obj["model"] = model
 	}
 	if mode := sandboxMode(a.Permissions); mode != "" {

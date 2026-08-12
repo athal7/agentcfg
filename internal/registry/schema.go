@@ -65,8 +65,32 @@ type HarnessConfig struct {
 	// into opencode.json alongside its own managed keys; omp treats each
 	// key as a dotted `omp config set <key> <json value>` call. Nil/empty
 	// means the harness gets only what the registry model itself
-	// expresses — no behavior change for a registry that never sets it.
 	Extra map[string]any `yaml:"extra,omitempty"`
+
+	// ModelClasses overrides the root-level model_classes map for this
+	// harness. Each key is a model class name; each value is the
+	// harness-specific model identifier (e.g. "openai-codex/gpt-5.6"
+	// instead of the root "openai/gpt-5.6"). Nil/empty means the root
+	// model_classes apply unchanged.
+	ModelClasses map[string]string `yaml:"model_classes,omitempty"`
+}
+
+// EffectiveModelClasses returns the model-class map a renderer should use
+// for the named harness: a copy of reg.ModelClasses with any harness-level
+// overrides (HarnessConfig.ModelClasses) applied on top. Context overrides
+// must be applied by the caller on top of the result (they are the most
+// specific and therefore applied last).
+func (reg *Registry) EffectiveModelClasses(harness string) map[string]string {
+	out := make(map[string]string, len(reg.ModelClasses))
+	for k, v := range reg.ModelClasses {
+		out[k] = v
+	}
+	if cfg, ok := reg.Harnesses[harness]; ok {
+		for k, v := range cfg.ModelClasses {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // BashPolicy is the content of bash.yaml (merged with bash.d/*.yaml).

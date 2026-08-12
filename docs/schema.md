@@ -93,6 +93,9 @@ harnesses:
   omp:
     agents_dir: ~/.omp/agent/agents
     bash_profile: lead
+    model_classes:
+      default: openai/gpt-5.6-terra
+      smol: openai/gpt-5.6-mini
 ```
 
 A map from harness/renderer ID (`opencode`, `omp`, `codex`, `claude`) to a `HarnessConfig`:
@@ -102,6 +105,7 @@ A map from harness/renderer ID (`opencode`, `omp`, `codex`, `claude`) to a `Harn
 | `Out` | `out` | string | (currently informational; renderers hardcode their own output paths — see `docs/capabilities.md` for what each renderer actually writes) |
 | `AgentsDir` | `agents_dir` | string | (currently informational, same caveat as `out`) |
 | `BashProfile` | `bash_profile` | string | which bash profile `agentcfg explain bash` treats as this harness's relevant profile (defaults to `"global"` if unset) |
+| `ModelClasses` | `model_classes` | `map[string]string` | optional per-harness literal overrides for root-level model classes |
 | `Extra` | `extra` | `map[string]any` | harness-native configuration the registry model has no dedicated field for — see [`extra:`](#extra) below |
 
 **Known asymmetry, documented rather than hidden:** opencode and omp
@@ -170,6 +174,12 @@ apply. Interpretation is renderer-specific:
 
 `extra` is per-harness and entirely optional; a registry that never sets
 it changes nothing about how that harness renders.
+`model_classes` may also appear beneath an individual `harnesses.<name>`
+entry. That mapping replaces only the named class literals for that
+harness; unspecified classes retain their root-level values. It does not
+change root-level validation: `default` and `smol` remain required only
+when the root mapping is declared.
+
 
 ## `model_classes:`
 
@@ -553,8 +563,8 @@ Used by `agentcfg apply --scope project` / `--scope all` (via
 `internal/scope.Project`): the directory's git `origin` remote is resolved
 to a host/owner pair, matched against `contexts` in order (first match
 wins), and the matched context's `model_classes` are overlaid — key by
-key, not wholesale — on top of the registry's own `model_classes` before
-being projected into a directory-local config file.
+key, not wholesale — on that renderer's effective root-and-harness mapping
+before being projected into a directory-local config file.
 
 | field | yaml tag | type |
 |---|---|---|

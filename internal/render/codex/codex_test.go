@@ -58,7 +58,15 @@ func gapForSubject(gaps []render.Gap, subject string) (render.Gap, bool) {
 func TestRender_LeadAdvisoryAndBuild(t *testing.T) {
 	reg := &registry.Registry{
 		ModelClasses: map[string]string{"default": "gpt-5.5", "smol": "gpt-5.5-mini", "big": "gpt-5.6"},
-		Bash:         baseBashPolicy(),
+		Harnesses: map[string]registry.HarnessConfig{
+			"codex": {
+				ModelClasses: map[string]string{
+					"default": "openai-codex/gpt-5.6-terra",
+					"big":     "openai-codex/gpt-5.6",
+				},
+			},
+		},
+		Bash: baseBashPolicy(),
 		Agents: []registry.Agent{
 			{
 				Name:        "lead",
@@ -140,7 +148,7 @@ func TestRender_LeadAdvisoryAndBuild(t *testing.T) {
 	for _, want := range []string{
 		`name = "build"`,
 		`description = "build"`, // falls back to name: registry left it empty
-		`model = "gpt-5.5"`,
+		`model = "openai-codex/gpt-5.6-terra"`,
 		`sandbox_mode = "workspace-write"`,
 		"You build things.",
 	} {
@@ -165,8 +173,8 @@ func TestRender_LeadAdvisoryAndBuild(t *testing.T) {
 	if cfg.Path != configPath {
 		t.Errorf("got MergeTOML path %q, want %q", cfg.Path, configPath)
 	}
-	if cfg.Object["model"] != "gpt-5.6" {
-		t.Errorf("got model %v, want gpt-5.6 (lead's class)", cfg.Object["model"])
+	if cfg.Object["model"] != "openai-codex/gpt-5.6" {
+		t.Errorf("got model %v, want openai-codex/gpt-5.6 (lead's class)", cfg.Object["model"])
 	}
 	if cfg.Object["sandbox_mode"] != "workspace-write" {
 		t.Errorf("got sandbox_mode %v, want workspace-write", cfg.Object["sandbox_mode"])

@@ -541,6 +541,32 @@ func TestRenderProject_DefaultModelSettingsOverride(t *testing.T) {
 		t.Errorf("got Managed %v, want exactly [model]", settings.Managed)
 	}
 }
+func TestRender_UsesHarnessModelClasses(t *testing.T) {
+	reg := &registry.Registry{
+		ModelClasses: map[string]string{"default": "root-default", "big": "root-big"},
+		Harnesses: map[string]registry.HarnessConfig{
+			"claude": {ModelClasses: map[string]string{"default": "claude-default", "big": "claude-big"}},
+		},
+		Agents: []registry.Agent{
+			{Name: "lead", Role: "primary", Class: "big", Prompt: registry.Prompt{Text: "Lead."}},
+		},
+	}
+
+	plan, err := New().Render(reg, render.Options{})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	settings := outputByType[render.MergeJSON](t, plan.Outputs)
+	if settings.Object["model"] != "claude-default" {
+		t.Errorf("got settings model %v, want claude-default", settings.Object["model"])
+	}
+	rebuild := outputByType[render.RebuildDir](t, plan.Outputs)
+	lead := agentFile(t, rebuild, "lead.md")
+	if !strings.Contains(string(lead.Content), "model: \"claude-big\"") {
+		t.Errorf("got lead.md:\n%s\nwant harness-specific big model", lead.Content)
+	}
+}
 
 // TestCapabilities_OnlyDeclaresWhatIsBuilt pins the exact capability set
 // so an unintended future addition/removal fails loudly.

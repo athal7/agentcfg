@@ -203,7 +203,8 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 		readFile = os.ReadFile
 	}
 
-	modelFor := func(class string) string { return reg.ModelClasses[class] }
+	classes := reg.EffectiveModelClasses("claude")
+	modelFor := func(class string) string { return classes[class] }
 
 	agentFiles, err := renderAgentFiles(reg, modelFor, readFile)
 	if err != nil {
@@ -218,7 +219,7 @@ func (r renderer) Render(reg *registry.Registry, opt render.Options) (*render.Pl
 	settingsObj := map[string]any{}
 	var managed []string
 
-	if model := reg.ModelClasses["default"]; model != "" {
+	if model := classes["default"]; model != "" {
 		settingsObj["model"] = model
 		managed = append(managed, "model")
 	}

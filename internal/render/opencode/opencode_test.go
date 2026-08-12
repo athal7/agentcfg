@@ -35,6 +35,15 @@ func leadAndBuildFixture() *registry.Registry {
 			"smol":    "claude-haiku",
 			"big":     "claude-opus-big",
 		},
+		Harnesses: map[string]registry.HarnessConfig{
+			"opencode": {
+				ModelClasses: map[string]string{
+					"default": "openai/gpt-5.6-terra",
+					"smol":    "openai/gpt-5.6-mini",
+					"big":     "openai/gpt-5.6",
+				},
+			},
+		},
 		Bash: baseBashPolicy(),
 		Agents: []registry.Agent{
 			{
@@ -119,8 +128,8 @@ func TestRender_LeadAndBuildWithOneMCPServer(t *testing.T) {
 	}
 
 	want := map[string]any{
-		"model":       "claude-opus",
-		"small_model": "claude-haiku",
+		"model":       "openai/gpt-5.6-terra",
+		"small_model": "openai/gpt-5.6-mini",
 		"permission": map[string]any{
 			"bash":     map[string]any{"*": "allow"},
 			"read":     "allow",
@@ -135,22 +144,22 @@ func TestRender_LeadAndBuildWithOneMCPServer(t *testing.T) {
 			"lead": map[string]any{
 				"description": "",
 				"mode":        "primary",
-				"model":       "claude-opus-big",
-				"prompt":      "You are lead.",
+				"model":       "openai/gpt-5.6",
 				"permission": map[string]any{
 					"bash": map[string]any{"*": "allow"},
 				},
+				"prompt": "You are lead.",
 			},
 			"build": map[string]any{
 				"description": "",
 				"mode":        "subagent",
-				"model":       "claude-opus",
-				"prompt":      "You build.",
+				"model":       "openai/gpt-5.6-terra",
 				"permission": map[string]any{
 					"bash":            map[string]any{"*": "allow"},
 					"task":            "allow",
 					"github_create_*": "ask",
 				},
+				"prompt": "You build.",
 				"tools": map[string]any{
 					"github_*": true,
 				},

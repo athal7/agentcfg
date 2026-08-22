@@ -16,13 +16,13 @@ import (
 
 // ImportedData represents raw extracted settings across one or more harnesses.
 type ImportedData struct {
-	ModelClasses map[string]string
-	BashProfiles map[string]registry.BashProfile
-	BashLists    map[string]map[string]registry.Decision
-	DefaultLists []string
+	ModelClasses  map[string]string
+	BashProfiles  map[string]registry.BashProfile
+	BashLists     map[string]map[string]registry.Decision
+	DefaultLists  []string
 	WorkflowSteps []registry.Agent
-	MCPServers   map[string]registry.MCPServer
-	HarnessExtra map[string]map[string]any
+	MCPServers    map[string]registry.MCPServer
+	HarnessExtra  map[string]map[string]any
 }
 
 // NewImportedData initializes an empty ImportedData structure.

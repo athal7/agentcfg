@@ -8,8 +8,17 @@ every field `agentcfg` actually reads, straight from
 field isn't listed here, the loader doesn't read it.
 
 The default registry location is resolved in this order (same for every
-command except `init`, see the `--registry` flag): `--registry <dir>` →
+command except `init` and `import`, see the `--registry` flag): `--registry <dir>` →
 `$AGENTCFG_REGISTRY` → `$XDG_CONFIG_HOME/agentcfg` → `~/.config/agentcfg`.
+
+## Importing Existing Configuration
+
+`agentcfg import [--from <harnesses>] [--registry <dir>] [--force]` reads
+existing native configuration files from installed harnesses (`opencode`, `omp`,
+`codex`, `claude`) and synthesizes a valid agentcfg registry directory.
+By default, it imports settings across all supported harnesses into the default
+registry directory, refusing to overwrite existing registry files unless `--force`
+is passed.
 
 ## Directory layout and file discovery
 

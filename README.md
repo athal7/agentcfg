@@ -29,6 +29,7 @@ go install github.com/athal7/agentcfg/cmd/agentcfg@latest
 
 ```sh
 agentcfg init                 # scaffold a minimal, valid registry
+agentcfg import               # (optional) import existing configs from opencode, omp, codex, claude
 agentcfg validate             # check it for errors/warnings
 agentcfg render --explain     # preview what would be written, with no side effects
 agentcfg apply                # actually write native config for every registered harness

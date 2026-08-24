@@ -3,6 +3,7 @@ package importer
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/athal7/agentcfg/internal/registry"
@@ -163,7 +164,8 @@ developer_instructions = "You plan software designs."
 func TestImportClaude(t *testing.T) {
 	home := t.TempDir()
 	claudeDir := filepath.Join(home, ".claude")
-	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+	agentsDir := filepath.Join(claudeDir, "agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -176,12 +178,24 @@ func TestImportClaude(t *testing.T) {
 		"mcpServers": {
 			"docs": {
 				"type": "http",
-				"url": "https://mcp.docs.org"
+				"url": "https://mcp.docs.org",
+				"headers": {"Authorization": "Bearer token"}
 			}
 		}
 	}`
 	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(claudeJSON), 0o644); err != nil {
 		t.Fatalf("write .claude.json: %v", err)
+	}
+	agentMarkdown := `---
+name: reviewer
+description: Reviews code.
+model: sonnet
+tools: Read, Grep
+maxTurns: 12
+---
+Review the change.`
+	if err := os.WriteFile(filepath.Join(agentsDir, "reviewer.md"), []byte(agentMarkdown), 0o644); err != nil {
+		t.Fatalf("write reviewer.md: %v", err)
 	}
 
 	data := NewImportedData()
@@ -194,5 +208,42 @@ func TestImportClaude(t *testing.T) {
 	}
 	if len(data.MCPServers) != 1 {
 		t.Fatalf("got %d mcp servers, want 1", len(data.MCPServers))
+	}
+	if data.MCPServers["docs"].Headers["Authorization"].Literal != "Bearer token" {
+		t.Errorf("got MCP header %q, want Bearer token", data.MCPServers["docs"].Headers["Authorization"].Literal)
+	}
+	if len(data.WorkflowSteps) != 1 {
+		t.Fatalf("got %d workflow steps, want 1", len(data.WorkflowSteps))
+	}
+	agent := data.WorkflowSteps[0]
+	if agent.Name != "reviewer" || agent.Steps == nil || *agent.Steps != 12 {
+		t.Errorf("got agent %#v, want reviewer with 12 steps", agent)
+	}
+	if agent.Extra["claude"]["tools"] != "Read, Grep" {
+		t.Errorf("got Claude agent extra %#v, want tools", agent.Extra)
+	}
+
+	res, err := SynthesizeRegistry(data)
+	if err != nil {
+		t.Fatalf("SynthesizeRegistry error: %v", err)
+	}
+	if !strings.Contains(res.Files["mcp.yaml"], `Authorization: "Bearer token"`) {
+		t.Errorf("MCP headers missing from synthesized registry: %s", res.Files["mcp.yaml"])
+	}
+	if strings.Contains(res.Files["workflow.yaml"], "name: lead") {
+		t.Errorf("synthesized registry unexpectedly added lead: %s", res.Files["workflow.yaml"])
+	}
+	registryDir := t.TempDir()
+	for name, content := range res.Files {
+		if err := os.WriteFile(filepath.Join(registryDir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	reg, _, _, err := registry.Load(registryDir)
+	if err != nil {
+		t.Fatalf("load synthesized registry: %v", err)
+	}
+	if got := reg.Agents[0].Extra["claude"]["tools"]; got != "Read, Grep" {
+		t.Errorf("got loaded Claude agent extra %#v, want tools", got)
 	}
 }

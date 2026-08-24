@@ -349,6 +349,14 @@ func importClaude(home string, data *ImportedData) error {
 						if url, ok := sObj["url"].(string); ok {
 							srv.URL = registry.Value{Literal: url}
 						}
+						if headers, ok := sObj["headers"].(map[string]any); ok {
+							srv.Headers = make(map[string]registry.Value, len(headers))
+							for headerName, value := range headers {
+								if literal, ok := value.(string); ok {
+									srv.Headers[headerName] = registry.Value{Literal: literal}
+								}
+							}
+						}
 					} else if t == "stdio" || t == "local" {
 						srv.Transport = "local"
 						if cmdStr, ok := sObj["command"].(string); ok {
@@ -370,6 +378,27 @@ func importClaude(home string, data *ImportedData) error {
 		}
 	}
 
+	agentsDir := filepath.Join(home, ".claude", "agents")
+	files, err := os.ReadDir(agentsDir)
+	if err == nil {
+		for _, file := range files {
+			if file.IsDir() || !strings.HasSuffix(file.Name(), ".md") {
+				continue
+			}
+			content, err := os.ReadFile(filepath.Join(agentsDir, file.Name()))
+			if err != nil {
+				return err
+			}
+			agent, err := importClaudeAgent(file.Name(), string(content))
+			if err != nil {
+				return fmt.Errorf("parsing Claude agent %s: %w", file.Name(), err)
+			}
+			data.WorkflowSteps = append(data.WorkflowSteps, agent)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
 	return nil
 }
 
@@ -381,16 +410,6 @@ func SynthesizeRegistry(data *ImportedData) (*Result, error) {
 	}
 	if data.ModelClasses["smol"] == "" {
 		data.ModelClasses["smol"] = "anthropic/claude-haiku-4-5"
-	}
-
-	// Fallback workflow step if none were imported
-	if len(data.WorkflowSteps) == 0 {
-		data.WorkflowSteps = append(data.WorkflowSteps, registry.Agent{
-			Name:   "lead",
-			Role:   "primary",
-			Class:  "default",
-			Prompt: registry.Prompt{Text: "You are a helpful assistant."},
-		})
 	}
 
 	// Deduplicate workflow steps by Name
@@ -412,10 +431,6 @@ func SynthesizeRegistry(data *ImportedData) (*Result, error) {
 		}
 		uniqueSteps = append(uniqueSteps, step)
 	}
-	if !hasPrimary && len(uniqueSteps) > 0 {
-		uniqueSteps[0].Role = "primary"
-	}
-
 	files := make(map[string]string)
 
 	// agentcfg.yaml
@@ -473,6 +488,13 @@ harnesses:
 		if step.Steps != nil {
 			sb += fmt.Sprintf("\n      steps: %d", *step.Steps)
 		}
+		if len(step.Extra) > 0 {
+			extraYAML, err := yaml.Marshal(step.Extra)
+			if err != nil {
+				return nil, fmt.Errorf("marshalling agent %q extra: %w", step.Name, err)
+			}
+			sb += "\n      extra:\n        " + strings.ReplaceAll(strings.TrimSuffix(string(extraYAML), "\n"), "\n", "\n        ")
+		}
 		stepBlocks = append(stepBlocks, sb)
 	}
 	files["workflow.yaml"] = fmt.Sprintf("workflow:\n  steps:\n%s\n", strings.Join(stepBlocks, "\n"))
@@ -497,12 +519,68 @@ harnesses:
 				}
 				sb += fmt.Sprintf("\n    command: [%s]", strings.Join(cmdParts, ", "))
 			}
+			if len(srv.Headers) > 0 {
+				headerNames := make([]string, 0, len(srv.Headers))
+				for name := range srv.Headers {
+					headerNames = append(headerNames, name)
+				}
+				sort.Strings(headerNames)
+				sb += "\n    headers:"
+				for _, name := range headerNames {
+					sb += fmt.Sprintf("\n      %s: %s", strconvQuoteIfNeeded(name), strconvQuoteIfNeeded(srv.Headers[name].Literal))
+				}
+			}
 			srvBlocks = append(srvBlocks, sb)
 		}
 		files["mcp.yaml"] = fmt.Sprintf("mcp_servers:\n%s\n", strings.Join(srvBlocks, "\n"))
 	}
 
 	return &Result{Files: files}, nil
+}
+
+func importClaudeAgent(filename, content string) (registry.Agent, error) {
+	agent := registry.Agent{
+		Name:   strings.TrimSuffix(filename, ".md"),
+		Role:   "delegate",
+		Class:  "default",
+		Prompt: registry.Prompt{Text: content},
+	}
+	if !strings.HasPrefix(content, "---\n") {
+		return agent, nil
+	}
+
+	frontmatterEnd := strings.Index(content[4:], "\n---\n")
+	if frontmatterEnd < 0 {
+		return agent, nil
+	}
+	frontmatterEnd += 4
+
+	var frontmatter map[string]any
+	if err := yaml.Unmarshal([]byte(content[4:frontmatterEnd]), &frontmatter); err != nil {
+		return registry.Agent{}, err
+	}
+	agent.Prompt.Text = content[frontmatterEnd+5:]
+	if name, ok := frontmatter["name"].(string); ok && name != "" {
+		agent.Name = name
+	}
+	if description, ok := frontmatter["description"].(string); ok {
+		agent.Description = description
+	}
+	switch maxTurns := frontmatter["maxTurns"].(type) {
+	case int:
+		agent.Steps = &maxTurns
+	case uint64:
+		steps := int(maxTurns)
+		agent.Steps = &steps
+	}
+	agent.Extra = map[string]map[string]any{"claude": frontmatter}
+	delete(agent.Extra["claude"], "name")
+	delete(agent.Extra["claude"], "description")
+	delete(agent.Extra["claude"], "maxTurns")
+	if len(agent.Extra["claude"]) == 0 {
+		agent.Extra = nil
+	}
+	return agent, nil
 }
 
 func formatYAMLList(list []string, prefix string) string {

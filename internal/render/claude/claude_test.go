@@ -616,3 +616,26 @@ func TestRender_CommandsUseClaudeOwnSkillsDir(t *testing.T) {
 		t.Fatalf("claude must not share opencode/omp's CommandsSkillsDir")
 	}
 }
+
+func TestRenderAgentFile_PreservesClaudeExtra(t *testing.T) {
+	content, err := renderAgentFile(&registry.Registry{}, registry.Agent{
+		Name:   "reviewer",
+		Class:  "default",
+		Prompt: registry.Prompt{Text: "Review."},
+		Extra: map[string]map[string]any{
+			"claude": {
+				"model":           "sonnet",
+				"tools":           []string{"Read", "Grep"},
+				"disallowedTools": []string{"Bash"},
+			},
+		},
+	}, "default", "Review.")
+	if err != nil {
+		t.Fatalf("renderAgentFile error: %v", err)
+	}
+	for _, want := range []string{`model: "sonnet"`, "disallowedTools: Bash", "tools:", "- Read", "- Grep"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("got agent file:\n%s\nwant %q", content, want)
+		}
+	}
+}

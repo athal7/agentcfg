@@ -343,6 +343,7 @@ the target-specific compilation mechanism — see [Role](#role) below:
 | `Permissions` | `permissions` | object | see below |
 | `MCP` | `mcp` | `[]AgentMCP` | which MCP servers this step may use |
 | `Opencode` | `opencode` | object | optional; names an `opencode_agents:` persona that renders this step for opencode instead of the step's own fields (see [Opencode](#opencode) below) |
+| `Extra` | `extra` | map of harness ID → native fields | optional native agent settings for the named harness |
 
 `Prompt`:
 
@@ -374,6 +375,29 @@ the target-specific compilation mechanism — see [Role](#role) below:
 |---|---|---|
 | `Server` | `server` | string — must name an entry in `mcp_servers` |
 | `Ask` | `ask` | `[]string` — tool-name/glob patterns this step must be asked about before use |
+
+### `extra`
+
+```yaml
+workflow:
+  steps:
+    - name: reviewer
+      role: delegate
+      class: default
+      prompt:
+        text: "Review the change."
+      extra:
+        claude:
+          tools: [Read, Grep, Glob]
+          permissionMode: plan
+```
+
+`extra` preserves agent fields that do not have a portable registry field.
+Each key is a renderer ID. A renderer reads only its own map. The Claude
+renderer writes `extra.claude` to its agent-file frontmatter. Its `model`
+value overrides that agent's rendered model. Its `disallowedTools` list is
+combined with agentcfg's generated restrictions. `name`, `description`, and
+`maxTurns` are registry-managed fields and cannot appear in `extra.claude`.
 
 ### `role`
 

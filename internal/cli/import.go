@@ -77,7 +77,11 @@ func runImport(out io.Writer, fromFlag, registryFlag string, forceFlag bool) err
 		return fmt.Errorf("import: creating directory %s: %w", dir, err)
 	}
 
-	for name, content := range res.Files {
+	for _, name := range []string{"models.yaml", "bash.yaml", "workflow.yaml", "mcp.yaml", "agentcfg.yaml"} {
+		content, ok := res.Files[name]
+		if !ok {
+			continue
+		}
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			return fmt.Errorf("import: writing %s: %w", name, err)

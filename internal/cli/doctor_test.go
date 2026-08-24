@@ -7,7 +7,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
+
+	"github.com/athal7/agentcfg/internal/registry"
+	"github.com/athal7/agentcfg/internal/renderers"
 )
 
 // TestAllCapabilities_MatchesRendererGoConstCount is the tripwire promised
@@ -93,5 +97,62 @@ func TestAllCapabilities_MatchesRendererGoConstCount(t *testing.T) {
 		sort.Strings(extra)
 		sort.Strings(duplicates)
 		t.Fatalf("allCapabilities is out of sync with renderer.go's Capability constants — missing: %v, extra (no longer a real constant): %v, duplicates: %v", missing, extra, duplicates)
+	}
+}
+
+func TestPrintCapabilityMatrixMarkdown_GroupsCapabilities(t *testing.T) {
+	var output strings.Builder
+	printCapabilityMatrix(&output, renderers.All(), allCapabilities, true)
+	got := output.String()
+
+	previous := -1
+	for _, heading := range []string{
+		"## Agents",
+		"## Permissions",
+		"## Model bindings",
+		"## Bash policies",
+		"## MCP servers",
+		"## Project policy",
+		"## Commands",
+	} {
+		position := strings.Index(got, heading)
+		if position < 0 {
+			t.Errorf("Markdown capability matrix does not contain heading %q", heading)
+		}
+		if position <= previous {
+			t.Errorf("Markdown capability heading %q is out of order", heading)
+		}
+		previous = position
+	}
+
+	if got, want := strings.Count(got, "\n| capability |"), len(capabilityGroups); got != want {
+		t.Errorf("Markdown capability table count = %d, want %d", got, want)
+	}
+	if !strings.Contains(got, "## Equivalent capabilities\n\nAn `≈` indicates the same registry feature uses a different native mechanism.\n\n| harness | capability | expressed via |") {
+		t.Error("Markdown capability matrix does not structure equivalent capabilities as a table")
+	}
+}
+
+func TestPrintRegistryGapsMarkdown_GroupsGapsByHarness(t *testing.T) {
+	registryRoot := filepath.Join("..", "..", "examples", "registry")
+	reg, validationErrors, _, err := registry.Load(registryRoot)
+	if err != nil {
+		t.Fatalf("loading example registry: %v", err)
+	}
+	if len(validationErrors) > 0 {
+		t.Fatalf("example registry has validation errors: %v", validationErrors)
+	}
+
+	var output strings.Builder
+	printRegistryGaps(&output, renderers.All(), reg, true)
+	got := output.String()
+
+	for _, heading := range []string{"## Registry gaps", "### claude", "### codex", "### opencode", "### omp"} {
+		if !strings.Contains(got, heading) {
+			t.Errorf("Markdown registry gaps does not contain heading %q", heading)
+		}
+	}
+	if !strings.Contains(got, "- **Skipped `per_agent_bash_policy` for `lead`**.") {
+		t.Error("Markdown registry gaps does not render a structured gap item")
 	}
 }

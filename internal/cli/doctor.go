@@ -88,6 +88,7 @@ var capabilityGroups = []capabilityGroup{
 // fails if a new constant is not assigned to a group.
 var allCapabilities = flattenCapabilityGroups(capabilityGroups)
 
+// flattenCapabilityGroups returns the capabilities in group order.
 func flattenCapabilityGroups(groups []capabilityGroup) []render.Capability {
 	var count int
 	for _, group := range groups {
@@ -228,13 +229,14 @@ func printCapabilityMatrix(w io.Writer, targets []render.Renderer, caps []render
 	}
 }
 
+// printMarkdownCapabilityTable writes one grouped capability table.
 func printMarkdownCapabilityTable(w io.Writer, targets []render.Renderer, caps []render.Capability, mark func(int, render.Capability) string) {
-	fmt.Fprint(w, "| capability |")
+	_, _ = fmt.Fprint(w, "| capability |")
 	for _, r := range targets {
 		fmt.Fprintf(w, " %s |", r.ID())
 	}
 	fmt.Fprintln(w)
-	fmt.Fprint(w, "|---|")
+	_, _ = fmt.Fprint(w, "|---|")
 	for range targets {
 		fmt.Fprint(w, "---|")
 	}
@@ -279,6 +281,7 @@ func printRegistryGaps(w io.Writer, targets []render.Renderer, reg *registry.Reg
 	}
 }
 
+// markdownGapKind returns the human-readable Markdown label for a gap kind.
 func markdownGapKind(kind render.GapKind) string {
 	switch kind {
 	case render.GapSkip:

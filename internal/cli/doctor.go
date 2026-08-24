@@ -11,37 +11,94 @@ import (
 	"github.com/athal7/agentcfg/internal/renderers"
 )
 
+// capabilityGroup gives a user-facing heading to closely related
+// capabilities in Markdown output.
+type capabilityGroup struct {
+	Title        string
+	Capabilities []render.Capability
+}
+
+// capabilityGroups keeps the Markdown capability matrix navigable while
+// preserving a complete, ordered view for the plain-text doctor output.
+var capabilityGroups = []capabilityGroup{
+	{
+		Title: "Agents",
+		Capabilities: []render.Capability{
+			render.CapAgentDefinitions,
+			render.CapPrimaryAgent,
+			render.CapComposeIntoPrimary,
+			render.CapPromptAppend,
+			render.CapPromptFileRef,
+			render.CapAgentSteps,
+		},
+	},
+	{
+		Title: "Permissions",
+		Capabilities: []render.Capability{
+			render.CapPrimaryAgentToolPermission,
+			render.CapAgentTaskPermission,
+			render.CapExternalDirectory,
+		},
+	},
+	{
+		Title: "Model bindings",
+		Capabilities: []render.Capability{
+			render.CapModelLiteralBinding,
+			render.CapModelClassBinding,
+		},
+	},
+	{
+		Title: "Bash policies",
+		Capabilities: []render.Capability{
+			render.CapBashUnorderedMap,
+			render.CapBashOrderedList,
+			render.CapBashInteriorGlob,
+			render.CapPerAgentBashPolicy,
+			render.CapGlobalBashPolicy,
+		},
+	},
+	{
+		Title: "MCP servers",
+		Capabilities: []render.Capability{
+			render.CapMCPLocalTransport,
+			render.CapMCPRemoteTransport,
+			render.CapMCPToolGlobs,
+			render.CapMCPPerToolAsk,
+		},
+	},
+	{
+		Title: "Project policy",
+		Capabilities: []render.Capability{
+			render.CapProjectModelPolicy,
+		},
+	},
+	{
+		Title: "Commands",
+		Capabilities: []render.Capability{
+			render.CapCustomCommands,
+			render.CapStructuredWorkflowCommand,
+		},
+	},
+}
+
 // allCapabilities is every render.Capability constant defined in
-// internal/render/renderer.go. Go has no runtime enum introspection, so
-// this list is maintained by hand — keep it in sync whenever a Cap*
-// constant is added there. TestAllCapabilities_MatchesRendererGoConstCount
-// is a tripwire that fails loudly (naming the exact count mismatch) if
-// this list falls out of sync, rather than doctor silently under-reporting
-// a new capability forever.
-var allCapabilities = []render.Capability{
-	render.CapAgentDefinitions,
-	render.CapPrimaryAgent,
-	render.CapPrimaryAgentToolPermission,
-	render.CapComposeIntoPrimary,
-	render.CapPromptAppend,
-	render.CapPromptFileRef,
-	render.CapAgentSteps,
-	render.CapAgentTaskPermission,
-	render.CapModelLiteralBinding,
-	render.CapModelClassBinding,
-	render.CapBashUnorderedMap,
-	render.CapBashOrderedList,
-	render.CapBashInteriorGlob,
-	render.CapPerAgentBashPolicy,
-	render.CapGlobalBashPolicy,
-	render.CapExternalDirectory,
-	render.CapMCPLocalTransport,
-	render.CapMCPRemoteTransport,
-	render.CapMCPToolGlobs,
-	render.CapMCPPerToolAsk,
-	render.CapProjectModelPolicy,
-	render.CapCustomCommands,
-	render.CapStructuredWorkflowCommand,
+// internal/render/renderer.go. It is flattened from capabilityGroups so the
+// plain-text and Markdown doctor outputs report the same capabilities. Go has
+// no runtime enum introspection; TestAllCapabilities_MatchesRendererGoConstCount
+// fails if a new constant is not assigned to a group.
+var allCapabilities = flattenCapabilityGroups(capabilityGroups)
+
+func flattenCapabilityGroups(groups []capabilityGroup) []render.Capability {
+	var count int
+	for _, group := range groups {
+		count += len(group.Capabilities)
+	}
+
+	caps := make([]render.Capability, 0, count)
+	for _, group := range groups {
+		caps = append(caps, group.Capabilities...)
+	}
+	return caps
 }
 
 // newDoctorCmd builds the doctor command.
@@ -85,7 +142,7 @@ func runDoctor(out io.Writer, registryFlag string, markdown bool) {
 		return
 	}
 
-	printRegistryGaps(out, targets, reg)
+	printRegistryGaps(out, targets, reg, markdown)
 }
 
 // printCapabilityMatrix writes a table of which capabilities each target
@@ -123,21 +180,9 @@ func printCapabilityMatrix(w io.Writer, targets []render.Renderer, caps []render
 	}
 
 	if markdown {
-		fmt.Fprint(w, "| capability |")
-		for _, r := range targets {
-			fmt.Fprintf(w, " %s |", r.ID())
-		}
-		fmt.Fprintln(w)
-		fmt.Fprint(w, "|---|")
-		for range targets {
-			fmt.Fprint(w, "---|")
-		}
-		fmt.Fprintln(w)
-		for _, c := range caps {
-			fmt.Fprintf(w, "| %s |", c)
-			for i := range targets {
-				fmt.Fprintf(w, " %s |", mark(i, c))
-			}
+		for _, group := range capabilityGroups {
+			fmt.Fprintf(w, "## %s\n\n", group.Title)
+			printMarkdownCapabilityTable(w, targets, group.Capabilities, mark)
 			fmt.Fprintln(w)
 		}
 	} else {
@@ -157,17 +202,70 @@ func printCapabilityMatrix(w io.Writer, targets []render.Renderer, caps []render
 		tw.Flush()
 	}
 
-	if len(substituted) > 0 {
+	if len(substituted) == 0 {
+		return
+	}
+
+	if !markdown {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "≈ = same underlying feature, expressed via a different harness-native mechanism (not a gap):")
+	}
+	if markdown {
+		fmt.Fprintln(w, "## Equivalent capabilities")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "An `≈` indicates the same registry feature uses a different native mechanism.")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "| harness | capability | expressed via |")
+		fmt.Fprintln(w, "|---|---|---|")
 		for _, s := range substituted {
-			fmt.Fprintf(w, "%s  %s — via %s\n", s.target, s.cap, s.via)
+			fmt.Fprintf(w, "| %s | %s | %s |\n", s.target, s.cap, s.via)
 		}
+		return
+	}
+
+	fmt.Fprintln(w, "≈ = same underlying feature, expressed via a different harness-native mechanism (not a gap):")
+	for _, s := range substituted {
+		fmt.Fprintf(w, "%s  %s — via %s\n", s.target, s.cap, s.via)
+	}
+}
+
+func printMarkdownCapabilityTable(w io.Writer, targets []render.Renderer, caps []render.Capability, mark func(int, render.Capability) string) {
+	fmt.Fprint(w, "| capability |")
+	for _, r := range targets {
+		fmt.Fprintf(w, " %s |", r.ID())
+	}
+	fmt.Fprintln(w)
+	fmt.Fprint(w, "|---|")
+	for range targets {
+		fmt.Fprint(w, "---|")
+	}
+	fmt.Fprintln(w)
+	for _, c := range caps {
+		fmt.Fprintf(w, "| %s |", c)
+		for i := range targets {
+			fmt.Fprintf(w, " %s |", mark(i, c))
+		}
+		fmt.Fprintln(w)
 	}
 }
 
 // printRegistryGaps writes each target's rendering gaps against the given registry.
-func printRegistryGaps(w io.Writer, targets []render.Renderer, reg *registry.Registry) {
+func printRegistryGaps(w io.Writer, targets []render.Renderer, reg *registry.Registry, markdown bool) {
+	if markdown {
+		fmt.Fprintln(w, "## Registry gaps")
+		for _, r := range targets {
+			gaps := render.DetectGaps(reg, r.Capabilities())
+			fmt.Fprintf(w, "\n### %s\n\n", r.ID())
+			if len(gaps) == 0 {
+				fmt.Fprintln(w, "No gaps.")
+				continue
+			}
+			for _, g := range gaps {
+				fmt.Fprintf(w, "- **%s `%s` for `%s`**. %s\n", markdownGapKind(g.Kind), g.Capability, g.Subject, g.Detail)
+			}
+		}
+		return
+	}
+
 	for _, r := range targets {
 		gaps := render.DetectGaps(reg, r.Capabilities())
 		if len(gaps) == 0 {
@@ -178,5 +276,16 @@ func printRegistryGaps(w io.Writer, targets []render.Renderer, reg *registry.Reg
 			fmt.Fprintf(w, "%s  %s  %s  %s\n", r.ID(), g.Kind, g.Capability, g.Subject)
 			fmt.Fprintf(w, "    %s\n", g.Detail)
 		}
+	}
+}
+
+func markdownGapKind(kind render.GapKind) string {
+	switch kind {
+	case render.GapSkip:
+		return "Skipped"
+	case render.GapReduction:
+		return "Reduced"
+	default:
+		return string(kind)
 	}
 }

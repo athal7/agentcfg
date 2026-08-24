@@ -180,6 +180,8 @@ type Agent struct {
 	Permissions Permissions `yaml:"permissions,omitempty"`
 	MCP         []AgentMCP  `yaml:"mcp,omitempty"`
 
+	Extra map[string]map[string]any `yaml:"extra,omitempty"`
+
 	// Role is the step's discipline: "primary" (the workflow's one entry
 	// point/orchestrator), "advisory" (reads and reasons, must not write
 	// or edit — compiles to a real permission-enforced standalone

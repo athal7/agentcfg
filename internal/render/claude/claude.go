@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/goccy/go-yaml"
+
 	"github.com/athal7/agentcfg/internal/registry"
 	"github.com/athal7/agentcfg/internal/render"
 )
@@ -323,10 +325,14 @@ func (r renderer) RenderProject(classes map[string]string, reg *registry.Registr
 		if err != nil {
 			return nil, fmt.Errorf("claude: project agent %q: %w", a.Name, err)
 		}
+		content, err := renderAgentFile(reg, a, model, body)
+		if err != nil {
+			return nil, fmt.Errorf("claude: project agent %q: %w", a.Name, err)
+		}
 		agentFiles = append(agentFiles, render.WriteFile{
 			Path:    a.Name + ".md",
 			Mode:    0600,
-			Content: []byte(renderAgentFile(reg, a, model, body)),
+			Content: []byte(content),
 		})
 	}
 	// Unconditional, even when agentFiles is empty: RebuildDir is the
@@ -383,10 +389,14 @@ func renderAgentFiles(reg *registry.Registry, modelFor func(string) string, read
 		if err != nil {
 			return nil, fmt.Errorf("claude: agent %q: %w", a.Name, err)
 		}
+		content, err := renderAgentFile(reg, a, modelFor(a.Class), body)
+		if err != nil {
+			return nil, fmt.Errorf("claude: agent %q: %w", a.Name, err)
+		}
 		files = append(files, render.WriteFile{
 			Path:    a.Name + ".md",
 			Mode:    0600,
-			Content: []byte(renderAgentFile(reg, a, modelFor(a.Class), body)),
+			Content: []byte(content),
 		})
 	}
 	return files, nil
@@ -427,7 +437,16 @@ func promptBody(a registry.Agent, readFile func(string) ([]byte, error)) (string
 //     visibility its mcp: grants declare, the same hard allowlist
 //     omp's frontmatter tools: list and opencode's per-agent tools map
 //     already enforce.
-func renderAgentFile(reg *registry.Registry, a registry.Agent, model, body string) string {
+func renderAgentFile(reg *registry.Registry, a registry.Agent, model, body string) (string, error) {
+	extra := a.Extra[targetName]
+	if len(extra) > 0 {
+		for _, key := range []string{"name", "description", "maxTurns"} {
+			if _, ok := extra[key]; ok {
+				return "", fmt.Errorf("agent extra.%s.%s conflicts with an agentcfg-managed field", targetName, key)
+			}
+		}
+	}
+
 	description := a.Description
 	if description == "" {
 		description = a.Name
@@ -455,6 +474,28 @@ func renderAgentFile(reg *registry.Registry, a registry.Agent, model, body strin
 		disallowed = append(disallowed, "mcp__"+s.Name)
 	}
 
+	passThrough := make(map[string]any, len(extra))
+	for key, value := range extra {
+		passThrough[key] = value
+	}
+	if extraModel, ok := passThrough["model"].(string); ok && extraModel != "" {
+		model = extraModel
+	}
+	delete(passThrough, "model")
+	if extraDisallowed, ok := passThrough["disallowedTools"]; ok {
+		switch tools := extraDisallowed.(type) {
+		case []any:
+			for _, tool := range tools {
+				if name, ok := tool.(string); ok {
+					disallowed = append(disallowed, name)
+				}
+			}
+		case []string:
+			disallowed = append(disallowed, tools...)
+		}
+		delete(passThrough, "disallowedTools")
+	}
+
 	var b strings.Builder
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "name: %s\n", a.Name)
@@ -468,9 +509,16 @@ func renderAgentFile(reg *registry.Registry, a registry.Agent, model, body strin
 	if len(disallowed) > 0 {
 		fmt.Fprintf(&b, "disallowedTools: %s\n", strings.Join(disallowed, ", "))
 	}
+	if len(passThrough) > 0 {
+		extraYAML, err := yaml.Marshal(passThrough)
+		if err != nil {
+			return "", err
+		}
+		b.Write(extraYAML)
+	}
 	b.WriteString("---\n")
 	b.WriteString(body)
-	return b.String()
+	return b.String(), nil
 }
 
 // renderAskList collects every claude-targeting agent's AgentMCP.Ask

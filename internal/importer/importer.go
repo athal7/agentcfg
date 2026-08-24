@@ -36,10 +36,8 @@ func NewImportedData() *ImportedData {
 	}
 }
 
-// Options controls import options such as home directory overriding and force overwriting.
 type Options struct {
 	HomeDir string
-	Force   bool
 }
 
 // Result holds the generated files to be written to the registry directory.
@@ -199,42 +197,49 @@ func importOMP(home string, data *ImportedData) error {
 	bytes, err := os.ReadFile(configPath)
 	if err == nil {
 		var raw map[string]any
-		if err := yaml.Unmarshal(bytes, &raw); err == nil {
-			if mr, ok := raw["modelRoles"].(map[string]any); ok {
-				if def, ok := mr["default"].(string); ok && def != "" {
-					if _, exists := data.ModelClasses["default"]; !exists {
-						data.ModelClasses["default"] = def
-					}
+		if err := yaml.Unmarshal(bytes, &raw); err != nil {
+			return fmt.Errorf("parsing config.yml: %w", err)
+		}
+		if mr, ok := raw["modelRoles"].(map[string]any); ok {
+			if def, ok := mr["default"].(string); ok && def != "" {
+				if _, exists := data.ModelClasses["default"]; !exists {
+					data.ModelClasses["default"] = def
 				}
-				if sm, ok := mr["smol"].(string); ok && sm != "" {
-					if _, exists := data.ModelClasses["smol"]; !exists {
-						data.ModelClasses["smol"] = sm
-					}
+			}
+			if sm, ok := mr["smol"].(string); ok && sm != "" {
+				if _, exists := data.ModelClasses["smol"]; !exists {
+					data.ModelClasses["smol"] = sm
 				}
 			}
 		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("reading config.yml: %w", err)
 	}
 
 	// Subagents in ~/.omp/agent/agents/*.md
 	agentsDir := filepath.Join(home, ".omp", "agent", "agents")
 	files, err := os.ReadDir(agentsDir)
-	if err == nil {
-		for _, f := range files {
-			if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") {
-				continue
-			}
-			agentName := strings.TrimSuffix(f.Name(), ".md")
-			content, err := os.ReadFile(filepath.Join(agentsDir, f.Name()))
-			if err != nil {
-				continue
-			}
-			data.WorkflowSteps = append(data.WorkflowSteps, registry.Agent{
-				Name:   agentName,
-				Role:   "delegate",
-				Class:  "default",
-				Prompt: registry.Prompt{Text: string(content)},
-			})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
 		}
+		return fmt.Errorf("reading agents directory: %w", err)
+	}
+	for _, f := range files {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") {
+			continue
+		}
+		agentName := strings.TrimSuffix(f.Name(), ".md")
+		content, err := os.ReadFile(filepath.Join(agentsDir, f.Name()))
+		if err != nil {
+			return fmt.Errorf("reading agent %s: %w", f.Name(), err)
+		}
+		data.WorkflowSteps = append(data.WorkflowSteps, registry.Agent{
+			Name:   agentName,
+			Role:   "delegate",
+			Class:  "default",
+			Prompt: registry.Prompt{Text: string(content)},
+		})
 	}
 
 	return nil
@@ -246,71 +251,78 @@ func importCodex(home string, data *ImportedData) error {
 	bytes, err := os.ReadFile(configPath)
 	if err == nil {
 		var raw map[string]any
-		if err := toml.Unmarshal(bytes, &raw); err == nil {
-			if m, ok := raw["model"].(string); ok && m != "" {
-				if _, exists := data.ModelClasses["default"]; !exists {
-					data.ModelClasses["default"] = m
-				}
+		if err := toml.Unmarshal(bytes, &raw); err != nil {
+			return fmt.Errorf("parsing config.toml: %w", err)
+		}
+		if m, ok := raw["model"].(string); ok && m != "" {
+			if _, exists := data.ModelClasses["default"]; !exists {
+				data.ModelClasses["default"] = m
 			}
-			if mcpMap, ok := raw["mcp_servers"].(map[string]any); ok {
-				for name, val := range mcpMap {
-					sObj, ok := val.(map[string]any)
-					if !ok {
-						continue
-					}
-					srv := registry.MCPServer{Name: name}
-					if url, ok := sObj["url"].(string); ok {
-						srv.Transport = "remote"
-						srv.URL = registry.Value{Literal: url}
-					} else if cmdStr, ok := sObj["command"].(string); ok {
-						srv.Transport = "local"
-						srv.Command = append(srv.Command, registry.Value{Literal: cmdStr})
-						if argsSlice, ok := sObj["args"].([]any); ok {
-							for _, arg := range argsSlice {
-								if as, ok := arg.(string); ok {
-									srv.Command = append(srv.Command, registry.Value{Literal: as})
-								}
+		}
+		if mcpMap, ok := raw["mcp_servers"].(map[string]any); ok {
+			for name, val := range mcpMap {
+				sObj, ok := val.(map[string]any)
+				if !ok {
+					continue
+				}
+				srv := registry.MCPServer{Name: name}
+				if url, ok := sObj["url"].(string); ok {
+					srv.Transport = "remote"
+					srv.URL = registry.Value{Literal: url}
+				} else if cmdStr, ok := sObj["command"].(string); ok {
+					srv.Transport = "local"
+					srv.Command = append(srv.Command, registry.Value{Literal: cmdStr})
+					if argsSlice, ok := sObj["args"].([]any); ok {
+						for _, arg := range argsSlice {
+							if as, ok := arg.(string); ok {
+								srv.Command = append(srv.Command, registry.Value{Literal: as})
 							}
 						}
 					}
-					if srv.Transport != "" {
-						data.MCPServers[name] = srv
-					}
+				}
+				if srv.Transport != "" {
+					data.MCPServers[name] = srv
 				}
 			}
 		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("reading config.toml: %w", err)
 	}
 
 	// Agents in ~/.codex/agents/*.toml
 	agentsDir := filepath.Join(home, ".codex", "agents")
 	files, err := os.ReadDir(agentsDir)
-	if err == nil {
-		for _, f := range files {
-			if f.IsDir() || !strings.HasSuffix(f.Name(), ".toml") {
-				continue
-			}
-			var aRaw map[string]any
-			content, err := os.ReadFile(filepath.Join(agentsDir, f.Name()))
-			if err != nil {
-				continue
-			}
-			if err := toml.Unmarshal(content, &aRaw); err == nil {
-				name, _ := aRaw["name"].(string)
-				if name == "" {
-					name = strings.TrimSuffix(f.Name(), ".toml")
-				}
-				desc, _ := aRaw["description"].(string)
-				instructions, _ := aRaw["developer_instructions"].(string)
-
-				data.WorkflowSteps = append(data.WorkflowSteps, registry.Agent{
-					Name:        name,
-					Description: desc,
-					Role:        "delegate",
-					Class:       "default",
-					Prompt:      registry.Prompt{Text: instructions},
-				})
-			}
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
 		}
+		return fmt.Errorf("reading agents directory: %w", err)
+	}
+	for _, f := range files {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".toml") {
+			continue
+		}
+		var aRaw map[string]any
+		content, err := os.ReadFile(filepath.Join(agentsDir, f.Name()))
+		if err != nil {
+			return fmt.Errorf("reading agent %s: %w", f.Name(), err)
+		}
+		if err := toml.Unmarshal(content, &aRaw); err != nil {
+			return fmt.Errorf("parsing agent %s: %w", f.Name(), err)
+		}
+		name, _ := aRaw["name"].(string)
+		if name == "" {
+			name = strings.TrimSuffix(f.Name(), ".toml")
+		}
+		desc, _ := aRaw["description"].(string)
+		instructions, _ := aRaw["developer_instructions"].(string)
+		data.WorkflowSteps = append(data.WorkflowSteps, registry.Agent{
+			Name:        name,
+			Description: desc,
+			Role:        "delegate",
+			Class:       "default",
+			Prompt:      registry.Prompt{Text: instructions},
+		})
 	}
 
 	return nil
@@ -322,60 +334,66 @@ func importClaude(home string, data *ImportedData) error {
 	bytes, err := os.ReadFile(settingsPath)
 	if err == nil {
 		var raw map[string]any
-		if err := json.Unmarshal(bytes, &raw); err == nil {
-			if m, ok := raw["model"].(string); ok && m != "" {
-				if _, exists := data.ModelClasses["default"]; !exists {
-					data.ModelClasses["default"] = m
-				}
+		if err := json.Unmarshal(bytes, &raw); err != nil {
+			return fmt.Errorf("parsing settings.json: %w", err)
+		}
+		if m, ok := raw["model"].(string); ok && m != "" {
+			if _, exists := data.ModelClasses["default"]; !exists {
+				data.ModelClasses["default"] = m
 			}
 		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("reading settings.json: %w", err)
 	}
 
 	claudeJSONPath := filepath.Join(home, ".claude.json")
 	cBytes, err := os.ReadFile(claudeJSONPath)
 	if err == nil {
 		var raw map[string]any
-		if err := json.Unmarshal(cBytes, &raw); err == nil {
-			if mcpMap, ok := raw["mcpServers"].(map[string]any); ok {
-				for name, val := range mcpMap {
-					sObj, ok := val.(map[string]any)
-					if !ok {
-						continue
+		if err := json.Unmarshal(cBytes, &raw); err != nil {
+			return fmt.Errorf("parsing .claude.json: %w", err)
+		}
+		if mcpMap, ok := raw["mcpServers"].(map[string]any); ok {
+			for name, val := range mcpMap {
+				sObj, ok := val.(map[string]any)
+				if !ok {
+					continue
+				}
+				srv := registry.MCPServer{Name: name}
+				t, _ := sObj["type"].(string)
+				if t == "http" || t == "remote" {
+					srv.Transport = "remote"
+					if url, ok := sObj["url"].(string); ok {
+						srv.URL = registry.Value{Literal: url}
 					}
-					srv := registry.MCPServer{Name: name}
-					t, _ := sObj["type"].(string)
-					if t == "http" || t == "remote" {
-						srv.Transport = "remote"
-						if url, ok := sObj["url"].(string); ok {
-							srv.URL = registry.Value{Literal: url}
-						}
-						if headers, ok := sObj["headers"].(map[string]any); ok {
-							srv.Headers = make(map[string]registry.Value, len(headers))
-							for headerName, value := range headers {
-								if literal, ok := value.(string); ok {
-									srv.Headers[headerName] = registry.Value{Literal: literal}
-								}
-							}
-						}
-					} else if t == "stdio" || t == "local" {
-						srv.Transport = "local"
-						if cmdStr, ok := sObj["command"].(string); ok {
-							srv.Command = append(srv.Command, registry.Value{Literal: cmdStr})
-						}
-						if argsSlice, ok := sObj["args"].([]any); ok {
-							for _, arg := range argsSlice {
-								if as, ok := arg.(string); ok {
-									srv.Command = append(srv.Command, registry.Value{Literal: as})
-								}
+					if headers, ok := sObj["headers"].(map[string]any); ok {
+						srv.Headers = make(map[string]registry.Value, len(headers))
+						for headerName, value := range headers {
+							if literal, ok := value.(string); ok {
+								srv.Headers[headerName] = registry.Value{Literal: literal}
 							}
 						}
 					}
-					if srv.Transport != "" {
-						data.MCPServers[name] = srv
+				} else if t == "stdio" || t == "local" {
+					srv.Transport = "local"
+					if cmdStr, ok := sObj["command"].(string); ok {
+						srv.Command = append(srv.Command, registry.Value{Literal: cmdStr})
 					}
+					if argsSlice, ok := sObj["args"].([]any); ok {
+						for _, arg := range argsSlice {
+							if as, ok := arg.(string); ok {
+								srv.Command = append(srv.Command, registry.Value{Literal: as})
+							}
+						}
+					}
+				}
+				if srv.Transport != "" {
+					data.MCPServers[name] = srv
 				}
 			}
 		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("reading .claude.json: %w", err)
 	}
 
 	agentsDir := filepath.Join(home, ".claude", "agents")
@@ -402,9 +420,7 @@ func importClaude(home string, data *ImportedData) error {
 	return nil
 }
 
-// SynthesizeRegistry generates agentcfg.yaml, models.yaml, bash.yaml, workflow.yaml, mcp.yaml from ImportedData.
 func SynthesizeRegistry(data *ImportedData) (*Result, error) {
-	// Fallback model classes if none were imported
 	if data.ModelClasses["default"] == "" {
 		data.ModelClasses["default"] = "anthropic/claude-sonnet-4-5"
 	}
@@ -412,11 +428,9 @@ func SynthesizeRegistry(data *ImportedData) (*Result, error) {
 		data.ModelClasses["smol"] = "anthropic/claude-haiku-4-5"
 	}
 
-	// Deduplicate workflow steps by Name
 	seenStepNames := make(map[string]bool)
-	var uniqueSteps []registry.Agent
+	uniqueSteps := make([]registry.Agent, 0, len(data.WorkflowSteps))
 	hasPrimary := false
-
 	for _, step := range data.WorkflowSteps {
 		if seenStepNames[step.Name] {
 			continue
@@ -431,108 +445,56 @@ func SynthesizeRegistry(data *ImportedData) (*Result, error) {
 		}
 		uniqueSteps = append(uniqueSteps, step)
 	}
-	files := make(map[string]string)
 
-	// agentcfg.yaml
 	imports := []string{"models.yaml", "bash.yaml", "workflow.yaml"}
 	if len(data.MCPServers) > 0 {
 		imports = append(imports, "mcp.yaml")
 	}
+	files := make(map[string]string, len(imports)+1)
 
-	agentcfgYAML := fmt.Sprintf(`version: 1
-imports:
-%s
-harnesses:
-  opencode:
-    out: ~/.config/opencode/opencode.json
-  omp:
-    agents_dir: ~/.omp/agent/agents
-`, formatYAMLList(imports, "  - "))
-	files["agentcfg.yaml"] = agentcfgYAML
-
-	// models.yaml
-	var mcLines []string
-	keys := make([]string, 0, len(data.ModelClasses))
-	for k := range data.ModelClasses {
-		keys = append(keys, k)
+	agentcfg := struct {
+		Version   int                               `yaml:"version"`
+		Imports   []string                          `yaml:"imports"`
+		Harnesses map[string]registry.HarnessConfig `yaml:"harnesses"`
+	}{
+		Version: 1,
+		Imports: imports,
+		Harnesses: map[string]registry.HarnessConfig{
+			"opencode": {Out: "~/.config/opencode/opencode.json"},
+			"omp":      {AgentsDir: "~/.omp/agent/agents"},
+		},
 	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		mcLines = append(mcLines, fmt.Sprintf("  %s: %s", k, data.ModelClasses[k]))
+	models := struct {
+		ModelClasses map[string]string `yaml:"model_classes"`
+	}{ModelClasses: data.ModelClasses}
+	bash := struct {
+		Bash registry.BashPolicy `yaml:"bash"`
+	}{Bash: registry.BashPolicy{Profiles: map[string]registry.BashProfile{
+		"global": {Base: registry.Allow},
+	}}}
+	workflow := struct {
+		Workflow registry.Workflow `yaml:"workflow"`
+	}{Workflow: registry.Workflow{Steps: uniqueSteps}}
+
+	var err error
+	if files["agentcfg.yaml"], err = marshalYAML(agentcfg); err != nil {
+		return nil, err
 	}
-	files["models.yaml"] = fmt.Sprintf("model_classes:\n%s\n", strings.Join(mcLines, "\n"))
-
-	// bash.yaml
-	files["bash.yaml"] = `bash:
-  profiles:
-    global:
-      base: allow
-`
-
-	// workflow.yaml
-	var stepBlocks []string
-	for _, step := range uniqueSteps {
-		sb := fmt.Sprintf("    - name: %s\n      role: %s\n      class: %s", step.Name, step.Role, step.Class)
-		if step.Description != "" {
-			sb += fmt.Sprintf("\n      description: %s", strconvQuoteIfNeeded(step.Description))
-		}
-		promptText := strings.TrimSpace(step.Prompt.Text)
-		if strings.Contains(promptText, "\n") {
-			indentedPrompt := "        " + strings.ReplaceAll(promptText, "\n", "\n        ")
-			sb += fmt.Sprintf("\n      prompt:\n        text: |\n%s", indentedPrompt)
-		} else if promptText != "" {
-			sb += fmt.Sprintf("\n      prompt:\n        text: %s", strconvQuoteIfNeeded(promptText))
-		} else {
-			sb += "\n      prompt:\n        text: \"You are a helpful assistant.\""
-		}
-		if step.Steps != nil {
-			sb += fmt.Sprintf("\n      steps: %d", *step.Steps)
-		}
-		if len(step.Extra) > 0 {
-			extraYAML, err := yaml.Marshal(step.Extra)
-			if err != nil {
-				return nil, fmt.Errorf("marshalling agent %q extra: %w", step.Name, err)
-			}
-			sb += "\n      extra:\n        " + strings.ReplaceAll(strings.TrimSuffix(string(extraYAML), "\n"), "\n", "\n        ")
-		}
-		stepBlocks = append(stepBlocks, sb)
+	if files["models.yaml"], err = marshalYAML(models); err != nil {
+		return nil, err
 	}
-	files["workflow.yaml"] = fmt.Sprintf("workflow:\n  steps:\n%s\n", strings.Join(stepBlocks, "\n"))
-
-	// mcp.yaml
+	if files["bash.yaml"], err = marshalYAML(bash); err != nil {
+		return nil, err
+	}
+	if files["workflow.yaml"], err = marshalYAML(workflow); err != nil {
+		return nil, err
+	}
 	if len(data.MCPServers) > 0 {
-		var srvBlocks []string
-		mcpKeys := make([]string, 0, len(data.MCPServers))
-		for k := range data.MCPServers {
-			mcpKeys = append(mcpKeys, k)
+		content, err := marshalMCPServers(data.MCPServers)
+		if err != nil {
+			return nil, err
 		}
-		sort.Strings(mcpKeys)
-		for _, k := range mcpKeys {
-			srv := data.MCPServers[k]
-			sb := fmt.Sprintf("  - name: %s\n    transport: %s", srv.Name, srv.Transport)
-			if srv.Transport == "remote" && srv.URL.Literal != "" {
-				sb += fmt.Sprintf("\n    url: %s", strconvQuoteIfNeeded(srv.URL.Literal))
-			} else if srv.Transport == "local" && len(srv.Command) > 0 {
-				var cmdParts []string
-				for _, c := range srv.Command {
-					cmdParts = append(cmdParts, strconvQuoteIfNeeded(c.Literal))
-				}
-				sb += fmt.Sprintf("\n    command: [%s]", strings.Join(cmdParts, ", "))
-			}
-			if len(srv.Headers) > 0 {
-				headerNames := make([]string, 0, len(srv.Headers))
-				for name := range srv.Headers {
-					headerNames = append(headerNames, name)
-				}
-				sort.Strings(headerNames)
-				sb += "\n    headers:"
-				for _, name := range headerNames {
-					sb += fmt.Sprintf("\n      %s: %s", strconvQuoteIfNeeded(name), strconvQuoteIfNeeded(srv.Headers[name].Literal))
-				}
-			}
-			srvBlocks = append(srvBlocks, sb)
-		}
-		files["mcp.yaml"] = fmt.Sprintf("mcp_servers:\n%s\n", strings.Join(srvBlocks, "\n"))
+		files["mcp.yaml"] = content
 	}
 
 	return &Result{Files: files}, nil
@@ -583,18 +545,70 @@ func importClaudeAgent(filename, content string) (registry.Agent, error) {
 	return agent, nil
 }
 
-func formatYAMLList(list []string, prefix string) string {
-	var lines []string
-	for _, item := range list {
-		lines = append(lines, prefix+item)
+func marshalYAML(value any) (string, error) {
+	content, err := yaml.Marshal(value)
+	if err != nil {
+		return "", err
 	}
-	return strings.Join(lines, "\n")
+	return string(content), nil
 }
 
-func strconvQuoteIfNeeded(s string) string {
-	if strings.ContainsAny(s, " \t\n:\"'#[]{}") || s == "" {
-		bytes, _ := json.Marshal(s)
-		return string(bytes)
+func marshalMCPServers(servers map[string]registry.MCPServer) (string, error) {
+	names := make([]string, 0, len(servers))
+	for name := range servers {
+		names = append(names, name)
 	}
-	return s
+	sort.Strings(names)
+
+	var b strings.Builder
+	b.WriteString("mcp_servers:\n")
+	for _, name := range names {
+		server := servers[name]
+		serverName, err := json.Marshal(server.Name)
+		if err != nil {
+			return "", err
+		}
+		transport, err := json.Marshal(server.Transport)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, "  - name: %s\n    transport: %s\n", serverName, transport)
+		if server.URL.Literal != "" {
+			url, err := json.Marshal(server.URL.Literal)
+			if err != nil {
+				return "", err
+			}
+			fmt.Fprintf(&b, "    url: %s\n", url)
+		}
+		if len(server.Command) > 0 {
+			b.WriteString("    command:\n")
+			for _, value := range server.Command {
+				command, err := json.Marshal(value.Literal)
+				if err != nil {
+					return "", err
+				}
+				fmt.Fprintf(&b, "      - %s\n", command)
+			}
+		}
+		if len(server.Headers) > 0 {
+			headerNames := make([]string, 0, len(server.Headers))
+			for headerName := range server.Headers {
+				headerNames = append(headerNames, headerName)
+			}
+			sort.Strings(headerNames)
+			b.WriteString("    headers:\n")
+			for _, headerName := range headerNames {
+				headerNameYAML, err := json.Marshal(headerName)
+				if err != nil {
+					return "", err
+				}
+				value, err := json.Marshal(server.Headers[headerName].Literal)
+				if err != nil {
+					return "", err
+				}
+				fmt.Fprintf(&b, "      %s: %s\n", headerNameYAML, value)
+			}
+		}
+	}
+	return b.String(), nil
 }

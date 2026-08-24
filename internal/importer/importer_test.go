@@ -9,6 +9,23 @@ import (
 	"github.com/athal7/agentcfg/internal/registry"
 )
 
+func assertValidRegistry(t *testing.T, result *Result) {
+	t.Helper()
+	registryDir := t.TempDir()
+	for name, content := range result.Files {
+		if err := os.WriteFile(filepath.Join(registryDir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	reg, _, _, err := registry.Load(registryDir)
+	if err != nil {
+		t.Fatalf("load synthesized registry: %v", err)
+	}
+	if errs, _ := registry.Validate(reg); len(errs) > 0 {
+		t.Fatalf("validate synthesized registry: %v", errs)
+	}
+}
+
 func TestImportOpencode(t *testing.T) {
 	home := t.TempDir()
 	configDir := filepath.Join(home, ".config", "opencode")
@@ -103,7 +120,7 @@ func TestImportOMP(t *testing.T) {
 		t.Fatalf("write config.yml: %v", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(agentsDir, "reviewer.md"), []byte("You review code."), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(agentsDir, "reviewer.md"), []byte("  You review code.\n    Preserve indentation."), 0o644); err != nil {
 		t.Fatalf("write reviewer.md: %v", err)
 	}
 
@@ -118,6 +135,11 @@ func TestImportOMP(t *testing.T) {
 	if len(data.WorkflowSteps) != 1 {
 		t.Fatalf("got %d workflow steps, want 1", len(data.WorkflowSteps))
 	}
+	res, err := SynthesizeRegistry(data)
+	if err != nil {
+		t.Fatalf("SynthesizeRegistry error: %v", err)
+	}
+	assertValidRegistry(t, res)
 }
 
 func TestImportCodex(t *testing.T) {
@@ -130,7 +152,7 @@ func TestImportCodex(t *testing.T) {
 
 	configTOML := `model = "openai/gpt-5"
 
-[mcp_servers.remote-mcp]
+[mcp_servers."remote:mcp"]
 url = "https://mcp.example.com/mcp"
 `
 	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(configTOML), 0o644); err != nil {
@@ -159,6 +181,11 @@ developer_instructions = "You plan software designs."
 	if len(data.WorkflowSteps) != 1 {
 		t.Fatalf("got %d workflow steps, want 1", len(data.WorkflowSteps))
 	}
+	res, err := SynthesizeRegistry(data)
+	if err != nil {
+		t.Fatalf("SynthesizeRegistry error: %v", err)
+	}
+	assertValidRegistry(t, res)
 }
 
 func TestImportClaude(t *testing.T) {
@@ -212,6 +239,9 @@ Review the change.`
 	if data.MCPServers["docs"].Headers["Authorization"].Literal != "Bearer token" {
 		t.Errorf("got MCP header %q, want Bearer token", data.MCPServers["docs"].Headers["Authorization"].Literal)
 	}
+	if server := data.MCPServers["docs"]; server.Transport != "remote" || server.URL.Literal != "https://mcp.docs.org" {
+		t.Errorf("got MCP server %#v, want remote docs server", server)
+	}
 	if len(data.WorkflowSteps) != 1 {
 		t.Fatalf("got %d workflow steps, want 1", len(data.WorkflowSteps))
 	}
@@ -227,7 +257,7 @@ Review the change.`
 	if err != nil {
 		t.Fatalf("SynthesizeRegistry error: %v", err)
 	}
-	if !strings.Contains(res.Files["mcp.yaml"], `Authorization: "Bearer token"`) {
+	if !strings.Contains(res.Files["mcp.yaml"], `"Bearer token"`) {
 		t.Errorf("MCP headers missing from synthesized registry: %s", res.Files["mcp.yaml"])
 	}
 	if strings.Contains(res.Files["workflow.yaml"], "name: lead") {
@@ -243,7 +273,24 @@ Review the change.`
 	if err != nil {
 		t.Fatalf("load synthesized registry: %v", err)
 	}
+	if errs, _ := registry.Validate(reg); len(errs) > 0 {
+		t.Fatalf("validate synthesized registry: %v", errs)
+	}
 	if got := reg.Agents[0].Extra["claude"]["tools"]; got != "Read, Grep" {
 		t.Errorf("got loaded Claude agent extra %#v, want tools", got)
+	}
+}
+
+func TestImportOMP_ReportsMalformedConfig(t *testing.T) {
+	home := t.TempDir()
+	ompDir := filepath.Join(home, ".omp")
+	if err := os.MkdirAll(ompDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ompDir, "config.yml"), []byte("modelRoles: ["), 0o644); err != nil {
+		t.Fatalf("write config.yml: %v", err)
+	}
+	if err := importOMP(home, NewImportedData()); err == nil {
+		t.Fatal("importOMP succeeded with malformed config")
 	}
 }

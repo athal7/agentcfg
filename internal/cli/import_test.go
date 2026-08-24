@@ -61,3 +61,11 @@ func TestRunImport_FreshRegistry(t *testing.T) {
 		t.Errorf("runImport second run with --force failed: %v", err)
 	}
 }
+
+func TestRunImport_RejectsUnknownHarness(t *testing.T) {
+	var out bytes.Buffer
+	err := runImport(&out, "unknown", t.TempDir(), false)
+	if err == nil || !strings.Contains(err.Error(), "supported: opencode, omp, codex, claude") {
+		t.Fatalf("got error %v, want supported harness list", err)
+	}
+}

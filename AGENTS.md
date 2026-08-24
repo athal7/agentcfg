@@ -29,10 +29,11 @@ accepts, its merge rules, and the bash policy compilation model.
 
 ## The validate → render --explain → apply sequence
 
-Editing a registry always follows the same sequence:
+To bootstrap a registry, run either `agentcfg init` for a new registry or
+`agentcfg import` to migrate supported settings from an existing harness.
+After that, always follow this sequence:
 
 ```sh
-agentcfg import               # (optional) import existing configs from opencode, omp, codex, claude
 agentcfg validate             # 1. check the registry for errors/warnings
 agentcfg render --explain     # 2. preview what apply would write, with no side effects
 agentcfg apply                # 3. write native config for every registered harness

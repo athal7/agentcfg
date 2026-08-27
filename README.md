@@ -45,6 +45,38 @@ failed. Use `--target opencode` (or `--target omp`, `--target codex`, `--target 
 one harness. See `agentcfg apply --help` and `docs/wiring.md` for the full
 flag set (`--scope`, `--context`, `--strict`, ...).
 
+## Migrate from an existing harness
+
+If you already configured a supported harness, `agentcfg import` gives you
+a working registry in one step. It reads each harness's native config,
+extracts the settings agentcfg understands, and writes a ready-to-edit
+registry:
+
+```sh
+agentcfg import               # import from every supported harness
+agentcfg import --from omp     # import from one harness only
+```
+
+By default `import` reads all four supported harnesses. `--from` takes a
+comma-separated subset (`opencode`, `omp`, `codex`, `claude`). Each
+harness is read from its standard location:
+
+- `opencode` — `~/.config/opencode/opencode.json`
+- `omp` — `~/.omp/config.yml` and `~/.omp/agent/agents/*.md`
+- `codex` — `~/.codex/config.toml` and `~/.codex/agents/*.toml`
+- `claude` — `~/.claude/settings.json`, `~/.claude.json`, and `~/.claude/agents/*.md`
+
+`import` extracts model classes, bash policy, workflow steps (agents), and
+MCP servers. It writes `agentcfg.yaml` plus `models.yaml`, `bash.yaml`,
+`workflow.yaml`, and — when it finds MCP servers — `mcp.yaml` into the
+resolved registry directory. Use `--registry <dir>` to choose that
+directory (default resolution: `AGENTCFG_REGISTRY` → `$XDG_CONFIG_HOME` →
+`~/.config/agentcfg`). `import` refuses to overwrite an existing registry
+file; pass `--force` (`-f`) to replace it.
+
+After import, run the normal `validate` → `render --explain` → `apply`
+sequence to check the result and write native config.
+
 ## Running agentcfg in a sandbox
 
 Set `HOME` to a sandbox directory before running any `agentcfg` command
